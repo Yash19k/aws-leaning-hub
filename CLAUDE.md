@@ -3,20 +3,26 @@
 ## What this is
 An interactive website that teaches AWS to 2nd–3rd year BTech students who can code
 (Python/JS basics) but have never used AWS. Built for our AWS Student Builder Group club.
-Students learn by exploring three real serverless projects: how each is built, why each
+Students learn by exploring real serverless projects: how each is built, why each
 AWS service is used, and a complete guide to build and deploy it themselves.
 
 ## Goal of every page
 Students should WANT to explore, not feel forced. Curiosity first, theory second.
 Every page answers: what does it do -> how does it work -> why this service -> build it yourself.
 
-## The three projects (real code lives in /source-projects, read it, never guess)
-1. File Drop Box with expiring links (beginner) -> `source-projects/file-dropbox/`, slug `file-drop-box`
-2. GitHub Repo Analytics Dashboard (intermediate) -> `source-projects/github-analytics/`, slug `github-analytics`
-   (driven by GitHub **webhooks** signed with HMAC; it does not poll the GitHub API, has no
-   EventBridge schedule and keeps the secret in a NoEcho parameter, not SSM/Secrets Manager)
-3. Live Quiz & Polling Platform (advanced) -> `source-projects/live-quiz/`, slug `live-quiz`
-All use AWS SAM, Python 3.12 Lambdas (arm64, boto3 only), plain HTML/JS frontends, region ap-south-1.
+## The projects (real code lives in /source-projects, read it, never guess)
+1. **DropVault**: file sharing with expiring links (beginner) -> `source-projects/dropvault/`, slug `dropvault`.
+   Terraform (>= 1.5), Python 3.13 Lambdas, REST API Gateway + Lambda authorizer, DynamoDB, S3
+   presigned/multipart uploads, SES, optional KMS, SNS/EventBridge alerts, React 19 web app on
+   Amplify Hosting. Deployed with `bash deploy.sh`. Its AWS resources are named `enclave-*`
+   (the `app_name` default), because it started as a fork of Enclave.
+2. **Quibble**: real-time multiplayer quiz (advanced) -> `source-projects/quibble/`, slug `quibble`.
+   AWS SAM, Node.js 22 Lambdas on arm64, API Gateway HTTP + WebSocket APIs, 9 DynamoDB tables,
+   S3 frontend, CloudWatch alarms/dashboard, SNS alerts, EventBridge rule on stack status.
+   Deployed with `npm run deploy`.
+3. **GitHub Repo Analytics** is shown as "coming soon" (`src/content/coming-soon.ts`): the real
+   app (RepoLedger) doesn't run on AWS yet.
+Refresh `source-projects/` with `git -C ../<repo> archive HEAD | tar -x -C source-projects/<repo>`.
 
 ## Tech stack
 - React 18 + Vite + TypeScript

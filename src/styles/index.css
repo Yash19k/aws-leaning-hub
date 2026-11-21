@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ tokens */
+@layer base {
+  :root {
+    --bg: 247 248 252;
+    --surface: 255 255 255;
+    --surface-2: 240 243 250;
+    --border: 223 228 239;
+    --text: 15 27 45;
+    --text-muted: 79 92 118;
+    --ring: 255 153 0;
+    color-scheme: light;
+  }
+
+  .dark {
+    --bg: 8 13 25;
+    --surface: 15 23 41;
+    --surface-2: 23 34 58;
+    --border: 39 53 84;
+    --text: 234 239 248;
+    --text-muted: 152 165 192;
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 5rem;
+  }
+
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgb(255 153 0 / 0.3);
+  }
+
+  :focus-visible {
+    outline: 3px solid rgb(var(--ring));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-bold tracking-tight;
+  }
+}
+
+/* ------------------------------------------------------------------ helpers */
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-content px-4 sm:px-6 lg:px-8;
+  }
+
+  .eyebrow {
+    @apply text-xs font-bold uppercase tracking-[0.14em] text-brand-700 dark:text-brand-300;
+  }
+
+  .text-link {
+    @apply font-semibold text-navy-600 underline decoration-brand-400 decoration-2 underline-offset-4 transition-colors hover:text-brand-700 dark:text-navy-200 dark:hover:text-brand-300;
+  }
+
+  .card-base {
+    @apply rounded-2xl border border-line bg-surface shadow-soft;
+  }
+
+  .dot-grid {
+    background-image: radial-gradient(rgb(var(--text) / 0.09) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+}
+
+/* ------------------------------------------------------------------ MDX prose */
+.prose-hub {
+  @apply max-w-prose text-[1.0625rem] leading-relaxed text-ink;
+}
+.prose-hub > * + * {
+  @apply mt-4;
+}
+.prose-hub h2 {
+  @apply mt-12 scroll-mt-24 text-2xl sm:text-3xl;
+}
+.prose-hub h3 {
+  @apply mt-8 scroll-mt-24 text-xl;
+}
+.prose-hub h4 {
+  @apply mt-6 text-lg;
+}
+.prose-hub p,
+.prose-hub li {
+  @apply text-ink/90;
+}
+.prose-hub a:not([data-plain]) {
+  @apply font-semibold text-navy-600 underline decoration-brand-400 decoration-2 underline-offset-4 hover:text-brand-700 dark:text-navy-200 dark:hover:text-brand-300;
+}
+.prose-hub ul {
+  @apply list-disc space-y-1.5 pl-6 marker:text-brand-500;
+}
+.prose-hub ol {
+  @apply list-decimal space-y-1.5 pl-6 marker:font-bold marker:text-brand-600;
+}
+.prose-hub strong {
+  @apply font-bold text-ink;
+}
+.prose-hub :not(pre) > code {
+  @apply rounded-md border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[0.875em] text-navy-700 dark:text-navy-100;
+}
+.prose-hub blockquote {
+  @apply border-l-4 border-brand-400 pl-4 italic text-muted;
+}
+.prose-hub hr {
+  @apply my-10 border-line;
+}
+.prose-hub table {
+  @apply block w-full overflow-x-auto text-sm sm:table;
+}
+.prose-hub thead th {
+  @apply border-b-2 border-line px-3 py-2 text-left font-bold;
+}
+.prose-hub tbody td {
+  @apply border-b border-line px-3 py-2 align-top;
+}
+.prose-hub img {
+  @apply rounded-xl border border-line;
+}
+
+/* ------------------------------------------------------------------ React Flow overrides */
+.hub-flow .react-flow__attribution {
+  display: none;
+}
+.hub-flow .react-flow__pane {
+  cursor: default;
+}
+.hub-flow .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+.hub-flow .react-flow__node {
+  cursor: default;
+}
+.hub-flow .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+.hub-flow .react-flow__edge-path {
+  transition:
+    stroke 0.2s,
+    stroke-width 0.2s,
+    opacity 0.2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

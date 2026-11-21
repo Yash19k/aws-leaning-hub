@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#0F1B2D" />
+    <title>AWS Learning Hub · See how real apps are built on AWS</title>
+    <meta
+      name="description"
+      content="Learn AWS by exploring real serverless projects. Click any box in the architecture to see what it does, watch requests flow, then build it yourself."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AWS Learning Hub" />
+    <meta
+      property="og:description"
+      content="Learn AWS by exploring real serverless projects. Pick a project, click anything."
+    />
+    <meta property="og:image" content="/og/default.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Apply the saved theme before first paint so there is no flash.
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem('awshub:theme');
+        } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = 'light';
+        }
+        if (theme === 'dark') document.documentElement.classList.add('dark');
+      })();
+    </script>
+  </head>
+  <body>
+    <noscript>This site needs JavaScript for its interactive diagrams.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

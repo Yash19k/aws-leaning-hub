@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+*.tsbuildinfo
+
+# The three source repos are read by the content checks but live in their own repos.
+source-projects/
+
+# SAM build output (infra/)
+.aws-sam/
+samconfig.local.toml
+
+# Screenshots from local QA
+.qa/
+.qa-dev.log

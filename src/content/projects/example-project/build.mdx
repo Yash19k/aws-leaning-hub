@@ -1,0 +1,31 @@
+## Before you start
+
+<Prerequisite slug="create-aws-account" />
+<Prerequisite slug="configure-aws-cli" />
+<Prerequisite slug="install-sam-cli" />
+
+<Step number={1} title="Get the code">
+
+Clone the repo and open the folder.
+
+<Command code={`git clone https://github.com/example/photo-notes.git\ncd photo-notes`} />
+
+</Step>
+
+<Step number={2} title="Deploy with SAM">
+
+<Command code={`sam build\nsam deploy --guided`} />
+
+<Checkpoint output={'Successfully created/updated stack - photo-notes in ap-south-1'}>
+  The terminal ends with a success line and prints your API URL.
+</Checkpoint>
+
+</Step>
+
+<Step number={3} title="Clean up">
+
+<Cleanup>
+  <Command code={`sam delete --stack-name photo-notes`} />
+</Cleanup>
+
+</Step>

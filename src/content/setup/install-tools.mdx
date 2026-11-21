@@ -1,0 +1,174 @@
+Time to set up your laptop. You install the four tools every project in this course needs, check each one works, and optionally add Docker for the projects' offline modes. Every command comes in Windows, macOS and Linux versions: pick your OS tab once and the site remembers it. It takes about **20 minutes**, mostly waiting for downloads.
+
+| Tool | What it does for you | Needed by |
+| --- | --- | --- |
+| **Git** (with **Git Bash** on Windows) | Downloads the project code. Git Bash runs DropVault's `deploy.sh` script on Windows. | Both projects |
+| **Python 3.13** (3.12 or newer is fine) | Runs DropVault's build scripts and your first SAM app. DropVault's Lambdas run on Python 3.13 in AWS. | DropVault, your first deploy |
+| **Node.js 22 or newer** | Runs Quibble's deploy scripts (needs 22+) and builds DropVault's web app (needs 20+). | Both projects |
+| **AWS CLI v2** | Lets you talk to AWS from the terminal. | Both projects |
+| **Docker Desktop** (optional) | Runs the projects' offline modes on your laptop. | Optional |
+
+<Callout type="tip" title="Windows: open a new terminal after each install">
+
+Installers add programs to your PATH, the list of folders Windows searches for commands. A terminal that was already open doesn't see the change. If a command says it's not recognized right after you install it, close the terminal and open a new one.
+
+</Callout>
+
+<Step number={1} title="Open a terminal and check your package manager">
+
+A **package manager** installs and updates tools with one command, like an app store for the terminal.
+
+- **Windows**: open **Terminal** or **PowerShell** from the Start menu. Windows 10 and 11 include `winget`.
+- **macOS**: open **Terminal** (press Cmd + Space and type Terminal). You'll use **Homebrew**.
+- **Linux** (Ubuntu or Debian): open a terminal. You'll use `apt`.
+
+<Command
+  windows={`winget --version`}
+  mac={`brew --version`}
+  linux={`sudo apt update`}
+/>
+
+**macOS: no Homebrew yet?** Install it with the official command below, then follow the **Next steps** it prints (they add `brew` to your PATH).
+
+<Command os="mac" code={`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`} />
+
+If `winget` asks you to accept source agreements the first time, type `Y` and press Enter.
+
+</Step>
+
+<Step number={2} title="Install Git (and Git Bash on Windows)">
+
+<Command
+  windows={`winget install -e --id Git.Git`}
+  mac={`brew install git`}
+  linux={`sudo apt install -y git`}
+/>
+
+**On Windows**, Git for Windows also installs **Git Bash**, a terminal that understands bash scripts. DropVault's deploy script is a bash script, so you will run it from Git Bash. Open **Git Bash** from the Start menu and check it:
+
+<Command title="In Git Bash" code={`bash --version`} output={`GNU bash, version 5.x.x ...`} />
+
+Git Bash usually lives at `C:\Program Files\Git\bin\bash.exe`. DropVault's settings file asks for that path on Windows, so remember it.
+
+</Step>
+
+<Step number={3} title="Install Python">
+
+<Command
+  windows={`winget install -e --id Python.Python.3.13`}
+  mac={`brew install python@3.13`}
+  linux={`sudo apt install -y python3 python3-pip python3-venv`}
+/>
+
+- **Windows**: the command is `python`. The winget package adds it to your PATH.
+- **macOS**: Homebrew's Python 3.13 is the command `python3.13`. The plain `python3` command may point to a different version, which is fine.
+- **Linux**: the command is `python3`, and you get the version your distribution ships. Anything **3.12 or newer** works for this course.
+
+</Step>
+
+<Step number={4} title="Install Node.js">
+
+Install the LTS (long-term support) version. Any version **22 or newer** works for both projects. `npm`, Node's package manager, comes with it.
+
+<Command
+  windows={`winget install -e --id OpenJS.NodeJS.LTS`}
+  mac={`brew install node`}
+  linux={`curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs`}
+/>
+
+On Linux, the `nodejs` package in Ubuntu's own repository is often too old, so these commands use NodeSource's repository instead TODO(verify).
+
+</Step>
+
+<Step number={5} title="Install the AWS CLI v2">
+
+The <Term t="AWS CLI">The AWS Command Line Interface: one program, aws, that can call almost every AWS service from your terminal.</Term> is how you, Terraform and SAM talk to your account from the terminal.
+
+<Command
+  windows={`winget install -e --id Amazon.AWSCLI`}
+  mac={`brew install awscli`}
+  linux={`sudo apt install -y unzip curl
+curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip
+sudo ./aws/install`}
+/>
+
+On Linux, this is AWS's official installer. `uname -m` picks the right file for your processor (`x86_64` for most laptops, `aarch64` for ARM). Avoid `apt install awscli`: it may give you an old version TODO(verify).
+
+</Step>
+
+<Step number={6} title="Optional: install Docker Desktop">
+
+You don't need Docker to deploy anything in this course. Install it only if you want to run DropVault or Quibble **offline** on your laptop, or test Lambda functions locally with `sam local`. Skip this step if your laptop is low on disk space or memory.
+
+<Command
+  windows={`winget install -e --id Docker.DockerDesktop`}
+  mac={`brew install --cask docker-desktop`}
+  linux={`curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh`}
+/>
+
+- **Windows**: Docker Desktop uses WSL 2 and may ask you to restart TODO(verify).
+- **macOS**: the Homebrew cask name has changed over time; if it isn't found, download Docker Desktop from [docker.com](https://www.docker.com/products/docker-desktop/) TODO(verify).
+- **Linux**: this is Docker's convenience script for Docker Engine. It's fine for a learning machine. For other options, see [Docker's install docs](https://docs.docker.com/engine/install/).
+
+Docker Desktop is free for personal and education use TODO(verify).
+
+</Step>
+
+<Step number={7} title="Check everything works">
+
+**Open a new terminal** first, then run:
+
+<Command
+  windows={`git --version
+python --version
+node --version
+npm --version
+aws --version`}
+  mac={`git --version
+python3.13 --version
+node --version
+npm --version
+aws --version`}
+  linux={`git --version
+python3 --version
+node --version
+npm --version
+aws --version`}
+/>
+
+<Checkpoint output={`git version 2.x.x.windows.1
+Python 3.13.x
+v22.x.x
+10.x.x
+aws-cli/2.x.x Python/3.x.x Windows/11 exe/AMD64`}>
+
+You see five version lines, one per tool. Your numbers will differ, and that's fine as long as:
+
+- Python is **3.12 or higher**,
+- Node is **v22 or higher** (any npm version is fine),
+- the AWS CLI line starts with **aws-cli/2**.
+
+On macOS and Linux the `git` line has no `.windows.1`, and the AWS CLI line names your OS.
+
+</Checkpoint>
+
+</Step>
+
+<Quiz
+  question="You just installed Node.js on Windows, but node --version says the command is not recognized. What should you try first?"
+  options={["Reinstall Windows", "Close the terminal and open a new one so it picks up the updated PATH", "Install an older version of Node.js"]}
+  answer={1}
+  explanation="The installer updated your PATH, but terminals that were already open still use the old one. A new terminal fixes it almost every time."
+/>
+
+## Common problems
+
+- **Windows says `winget` is not recognized.** Update **App Installer** from the Microsoft Store, then open a new terminal TODO(verify).
+- **Typing `python` on Windows opens the Microsoft Store.** Open a new terminal first. If it still happens, go to **Settings > Apps > Advanced app settings > App execution aliases** and turn off the aliases for `python.exe` and `python3.exe` TODO(verify).
+- **macOS says `brew: command not found` after installing Homebrew.** Run the two commands Homebrew printed under **Next steps**. They add Homebrew to your PATH. Then open a new terminal.
+- **`aws --version` shows `aws-cli/1.x`.** You have the old version 1. Remove it (for example `pip uninstall awscli`), install v2 with the commands in step 5, and open a new terminal. More fixes: [Troubleshooting](/troubleshooting).
+
+[Next: Connect the AWS CLI](/setup/configure-aws-cli)

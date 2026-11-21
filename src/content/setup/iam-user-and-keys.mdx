@@ -1,0 +1,188 @@
+Now you create the user you will actually work as. It gets permissions to build the course projects, an optional console login, and an **access key** so the AWS CLI, SAM and Terraform can act on your behalf. You will also learn the one rule that saves students from surprise bills: **access keys never go on GitHub**. It takes about **15 minutes**.
+
+<Prerequisite slug="secure-your-account" />
+
+## Two ways to give your laptop access to AWS
+
+<Term t="IAM">Identity and Access Management: the AWS service that controls who can sign in and what each identity is allowed to do.</Term> gives you two common options. Here is an honest comparison:
+
+| | IAM user + access key | IAM Identity Center (SSO) |
+| --- | --- | --- |
+| What you get | A long-lived key that works until you delete it | Short-lived credentials that expire after some hours |
+| Setup effort | About 10 minutes | More steps. It also turns on AWS Organizations TODO(verify) |
+| Works with Terraform, SAM and the project scripts | Yes | Yes, through a named profile and `aws sso login` TODO(verify) |
+| If the credentials leak | Dangerous until you notice and delete the key | Much less dangerous, because they expire soon |
+
+**For this course, use an IAM user with an access key.** It is the simplest path that works with every tool here, and it teaches you how AWS credentials work. Just treat the key like a password.
+
+<Callout type="security" title="Want the more secure option?">
+
+AWS recommends short-lived credentials. If you are comfortable with a few extra steps, enable **IAM Identity Center**, create a user, give it the `AdministratorAccess` permission set for your account, and then run `aws configure sso` on your laptop instead of creating an access key. You sign in with `aws sso login` each day. Both DropVault (its `aws_profile` setting) and Quibble work with an SSO profile. Newer versions of the AWS CLI also have an `aws login` command that uses your console sign-in, but check that Terraform and SAM support it before relying on it TODO(verify).
+
+</Callout>
+
+## Part 1: Create the user
+
+<Step number={1} title="Open IAM (as root, one last time)">
+
+Sign in as the root user. Type **IAM** in the search bar and open it. IAM is global, so the selected region doesn't matter.
+
+This is the last everyday job you do as root.
+
+</Step>
+
+<Step number={2} title="Create the user">
+
+<ConsoleStep path="IAM > Users > Create user">
+
+1. **User name**: `dev-admin` (or your own name, such as `priya-dev`).
+2. Tick **Provide user access to the AWS Management Console** TODO(verify). This lets you use the console without the root user. Skip it only if you will do everything from the terminal.
+3. If asked what kind of user, choose **I want to create an IAM user** TODO(verify). The other option, Identity Center, is the SSO path described above.
+4. Choose **Custom password** and type a strong password. Since this user is for you, untick **Users must create a new password at next sign-in** TODO(verify).
+5. Click **Next**.
+
+</ConsoleStep>
+
+</Step>
+
+<Step number={3} title="Attach AdministratorAccess">
+
+<ConsoleStep path="Set permissions > Attach policies directly">
+
+1. In the search box, type `AdministratorAccess`.
+2. Tick **AdministratorAccess** (the AWS managed policy with exactly that name).
+3. Click **Next**.
+
+</ConsoleStep>
+
+<Callout type="warning" title="Why such broad permissions?">
+
+Deploying DropVault or Quibble creates Lambda functions, API Gateway APIs, DynamoDB tables, S3 buckets, IAM roles, alarms and more. Writing a tight policy that allows exactly that is a project of its own, so for learning in your own account, broad permissions are the practical choice.
+
+The risk is real, though: anyone who gets this user's key can do almost anything in your account. You reduce that risk by turning on MFA for the user, keeping the key off GitHub, and deleting the key when you no longer need it. In a job, you would get much narrower permissions.
+
+</Callout>
+
+</Step>
+
+<Step number={4} title="Review, create, and save the sign-in link">
+
+Check the summary, then click **Create user**.
+
+If you gave the user console access, AWS shows a **Console sign-in URL** TODO(verify). It looks like `https://123456789012.signin.aws.amazon.com/console`, with your own 12-digit account ID. Save it in your password manager with the user name and password.
+
+<Checkpoint>
+
+**IAM > Users** lists `dev-admin`. Click it, and under **Permissions** you see the **AdministratorAccess** policy attached.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={5} title="Sign in as your new user and add MFA">
+
+1. Sign out of root.
+2. Open your console sign-in URL. Enter the user name and password.
+3. Click the user name (top right) > **Security credentials** > **Assign MFA device**, and set up MFA exactly as you did for root in [Lock down the root user](/setup/secure-your-account).
+
+From now on, this is the user you sign in with. Skipped console access in step 2? You can skip this step too.
+
+</Step>
+
+## Part 2: Create an access key for the CLI
+
+<Step number={6} title="Create the access key">
+
+An <Term t="access key">A pair of values (an access key ID and a secret access key) that lets programs like the AWS CLI call AWS as a specific IAM user. It works like a username and password for code.</Term> is what the AWS CLI, SAM and Terraform use to prove who you are.
+
+<ConsoleStep path="IAM > Users > dev-admin > Security credentials > Access keys > Create access key">
+
+1. For the use case, choose **Command Line Interface (CLI)** TODO(verify).
+2. AWS suggests safer alternatives (such as Identity Center). Tick the box that says you understand and want to continue TODO(verify), then click **Next**.
+3. Optionally add a description, such as `laptop-cli`. It helps you know which key is which later.
+4. Click **Create access key**.
+
+</ConsoleStep>
+
+AWS shows two values:
+
+- **Access key ID**: starts with `AKIA`. This is like a username.
+- **Secret access key**: a long random string. This is like a password.
+
+<Callout type="security" title="The secret is shown only once">
+
+Copy both values into your password manager now, or click **Download .csv file** and keep the file **outside** every project folder. If you lose the secret, you can't see it again. You would have to create a new key. You paste both values into `aws configure` in the [Connect the AWS CLI](/setup/configure-aws-cli) guide.
+
+</Callout>
+
+<Checkpoint>
+
+The **Access keys** section of the user's **Security credentials** tab shows one key with status **Active**. Its ID starts with `AKIA`.
+
+</Checkpoint>
+
+</Step>
+
+## Part 3: Keep your keys safe
+
+<Step number={7} title="Never put keys in code or on GitHub">
+
+Bots scan every public GitHub repo, all day, looking for AWS keys. A key pushed to a public repo can be found and abused within minutes, often to run crypto-mining servers on **your** bill. Deleting the commit afterwards doesn't help: the key has already been copied.
+
+Follow these rules:
+
+- **Keys live only in `~/.aws/credentials`** on your laptop, which `aws configure` creates outside any project. The AWS CLI, SAM, Terraform and the AWS SDKs (boto3, the AWS SDK for JavaScript) all read it automatically, so you never need a key in your code.
+- **Lambda functions don't need your keys at all.** They get permissions from an IAM role. You'll see this in both projects.
+- **Use a `.gitignore`.** It is a file listing paths Git must never track. Here is part of DropVault's real `.gitignore`, which already protects its secret files:
+
+```bash title="dropvault/.gitignore"
+# Terraform (state, cache, packaged lambdas, and YOUR real vars)
+.terraform/
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+
+# Secrets / local config
+.env
+.env.local
+```
+
+- **Look before you commit.** Run `git status` and read the list of files. If you see a `.env`, `.csv`, `terraform.tfvars` or `credentials` file, stop and add it to `.gitignore`.
+
+</Step>
+
+<Step number={8} title="Know what to do if a key leaks">
+
+If a key ever lands in a commit, a screenshot, a chat or a public file, act **within minutes**:
+
+1. **Deactivate the key**: **IAM > Users > dev-admin > Security credentials**, find the key under **Access keys**, then choose **Actions > Deactivate** TODO(verify). Then delete it.
+2. **Create a new key** (step 6) and run `aws configure` again with it.
+3. **Look for damage**: open **Billing and Cost Management > Bills** and check every region. Look for EC2 instances or other resources you didn't create.
+4. **Get help**: AWS may email you and restrict the key automatically when it spots a leak TODO(verify). Open a support case in the console if you see unexpected charges.
+
+You can also rotate keys from the terminal once your CLI is set up (guide 6). A user can have at most two access keys, which lets you swap without downtime. Replace the example key IDs with yours:
+
+<Command code={`# 1. Create a second key, then run aws configure with it
+aws iam create-access-key --user-name dev-admin
+# 2. Turn off the old key
+aws iam update-access-key --user-name dev-admin --access-key-id AKIAIOSFODNN7EXAMPLE --status Inactive
+# 3. When everything still works, delete the old key
+aws iam delete-access-key --user-name dev-admin --access-key-id AKIAIOSFODNN7EXAMPLE`} />
+
+</Step>
+
+<Quiz
+  question="Where should your secret access key live?"
+  options={["In a .env file committed to your repo, so teammates can deploy too", "In ~/.aws/credentials on your laptop, outside any Git repo", "Hard-coded in your Lambda function, since it needs to call AWS"]}
+  answer={1}
+  explanation="aws configure stores keys in ~/.aws/credentials, where every AWS tool finds them. Lambda functions use an IAM role, not your personal keys, and nothing secret should ever be committed."
+/>
+
+## Common problems
+
+- **My IAM user sees Access denied on billing pages.** Sign in as root, open your account name (top right) > **Account**, and activate **IAM user and role access to Billing information** TODO(verify).
+- **I lost the secret access key.** You can't view it again. Create a new key, then deactivate and delete the old one.
+- **AWS won't let me create another key.** Each user can have two access keys. Delete one you no longer use, then try again.
+- **I forgot my console sign-in URL.** It is `https://` + your 12-digit account ID + `.signin.aws.amazon.com/console`. Sign in as root and click your account name to see the ID. More fixes: [Troubleshooting](/troubleshooting).
+
+[Next: Install your tools](/setup/install-tools)

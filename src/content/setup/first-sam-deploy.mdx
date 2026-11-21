@@ -1,0 +1,314 @@
+Time for your first real deploy. You will create a tiny "hello world" API with SAM, put it on the internet, call it from your terminal and browser, and look inside CloudFormation to see exactly what got created. Then you delete it all with one command. It's the same build-deploy-delete loop Quibble uses, on a much smaller app. It takes about **20 minutes**.
+
+<Prerequisite slug="configure-aws-cli" />
+<Prerequisite slug="install-sam-cli" />
+
+<Callout type="cost" title="What this costs">
+
+This app is one Lambda function behind one API. The few requests you send should be covered by the Free Tier or your credits TODO(verify). You delete everything at the end, so nothing keeps running.
+
+</Callout>
+
+## Part 1: Create the app
+
+<Step number={1} title="Create a starter project with sam init">
+
+Make a practice folder and start the wizard:
+
+<Command code={`mkdir aws-practice
+cd aws-practice
+sam init`} />
+
+On Windows, a short path such as `C:\code\aws-practice` avoids file-path-length errors.
+
+SAM asks a series of questions. Type the answers shown here (the menus and wording may differ slightly in your SAM version TODO(verify)):
+
+```text
+Which template source would you like to use?
+    1 - AWS Quick Start Templates
+    2 - Custom Template Location
+Choice: 1
+
+Choose an AWS Quick Start application template
+    1 - Hello World Example
+    2 - Data processing
+    ...
+Template: 1
+
+Use the most popular runtime and package type? (Python and zip) [y/N]: y
+
+Would you like to enable X-Ray tracing on the function(s) in your application?  [y/N]: N
+
+Would you like to enable monitoring using CloudWatch Application Insights? [y/N]: N
+
+Would you like to set Structured Logging in JSON format on your Lambda functions?  [y/N]: N
+
+Project name [sam-app]: sam-app
+```
+
+What each answer means:
+
+1. **Template source: AWS Quick Start Templates.** Ready-made starter projects from AWS.
+2. **Template: Hello World Example.** One function, one API, nothing else.
+3. **Most popular runtime: y.** A Python function, packaged as a zip file.
+4. **X-Ray tracing: N.** X-Ray draws maps of requests across services. Not needed here.
+5. **CloudWatch Application Insights: N.** Extra monitoring dashboards. Not needed here.
+6. **Structured logging in JSON: N.** Keeps the logs simple.
+7. **Project name: sam-app.** The folder SAM creates. Press Enter to accept it.
+
+</Step>
+
+<Step number={2} title="Make the Python version match">
+
+`sam build` uses the Python on your laptop, and it must be the **same version** as the function's runtime in AWS. Check yours:
+
+<Command
+  windows={`python --version`}
+  mac={`python3.13 --version`}
+  linux={`python3 --version`}
+/>
+
+Now open `sam-app/template.yaml` in your editor and find the `Runtime:` line under `HelloWorldFunction`:
+
+```yaml title="sam-app/template.yaml"
+      Runtime: python3.13
+```
+
+If the numbers differ (for example, your laptop has Python 3.12 but the template says `python3.13`), change the template to match your Python, such as `python3.12`, and save the file.
+
+</Step>
+
+<Step number={3} title="Take a tour of the project">
+
+Move into the project folder:
+
+<Command code={`cd sam-app`} />
+
+The files that matter most:
+
+```text
+sam-app/
+├── template.yaml        what to create in AWS (the SAM template)
+├── samconfig.toml       saved settings for sam build and sam deploy
+├── hello_world/
+│   ├── app.py           your Lambda function's code
+│   └── requirements.txt Python packages the function needs
+├── events/event.json    a sample request, for local testing
+└── tests/               example unit and integration tests
+```
+
+The heart of `template.yaml` looks roughly like this (trimmed, and yours may differ slightly):
+
+```yaml title="sam-app/template.yaml" {2,5-6,13-18}
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Architectures:
+        - x86_64
+      Events:
+        HelloWorld:
+          Type: Api
+          Properties:
+            Path: /hello
+            Method: get
+```
+
+- **`Transform: AWS::Serverless-2016-10-31`** is the line that makes this a SAM template. It tells CloudFormation to expand the shorthand.
+- **`AWS::Serverless::Function`** is one Lambda function. `Handler: app.lambda_handler` means "run the `lambda_handler` function in `app.py`".
+- **`Events`** says "when someone sends GET `/hello` to an API, run this function". SAM creates the API for you from these five lines.
+
+And the function itself, in `hello_world/app.py` (comments removed):
+
+```python title="sam-app/hello_world/app.py"
+import json
+
+def lambda_handler(event, context):
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": "hello world",
+        }),
+    }
+```
+
+It receives the HTTP request as `event` and returns an HTTP response: status 200 and a small JSON body. That's a whole backend.
+
+</Step>
+
+## Part 2: Build and deploy
+
+<Step number={4} title="Build it">
+
+<Command code={`sam build`} />
+
+SAM copies your code and installs anything listed in `requirements.txt` into a hidden `.aws-sam/build` folder, ready to upload.
+
+<Checkpoint output={`Build Succeeded
+
+Built Artifacts  : .aws-sam/build
+Built Template   : .aws-sam/build/template.yaml`}>
+
+The build ends with **Build Succeeded**.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={5} title="Deploy it with sam deploy --guided">
+
+<Command code={`sam deploy --guided`} />
+
+The `--guided` flag asks you questions the first time and saves your answers. Answer like this:
+
+```text
+Stack Name [sam-app]: sam-app
+AWS Region [ap-south-1]: ap-south-1
+#Shows you resources changes to be deployed and require a 'Y' to initiate deploy
+Confirm changes before deploy [y/N]: y
+#SAM needs permission to be able to create roles to connect to the resources in your template
+Allow SAM CLI IAM role creation [Y/n]: Y
+#Preserves the state of previously provisioned resources when an operation fails
+Disable rollback [y/N]: N
+HelloWorldFunction may not have authorization defined, Is this okay? [y/N]: y
+Save arguments to configuration file [Y/n]: Y
+SAM configuration file [samconfig.toml]:
+SAM configuration environment [default]:
+```
+
+What each prompt means:
+
+1. **Stack Name**: the name of the CloudFormation **stack**, the group of resources this app becomes. `sam-app` is fine.
+2. **AWS Region**: where to deploy. It defaults to the region from `aws configure`. Make sure it says `ap-south-1`.
+3. **Confirm changes before deploy: y.** SAM shows you a list of what it will create and waits for your yes. Great for learning.
+4. **Allow SAM CLI IAM role creation: Y.** Your function needs an IAM role (its own set of permissions) to run and write logs. SAM creates it for you.
+5. **Disable rollback: N.** If something fails halfway, CloudFormation undoes everything, so you never end up with a half-built app.
+6. **HelloWorldFunction may not have authorization defined: y.** Your API is public: anyone with the URL can call it. That's intended for a hello-world demo. Real apps add sign-in (Quibble checks login tokens, for example). Older SAM versions word this as "has no authentication" TODO(verify).
+7. **Save arguments to configuration file: Y.** SAM writes your answers to `samconfig.toml`, so next time a plain `sam deploy` is enough.
+8. **Configuration file and environment**: press Enter to accept the defaults.
+
+SAM then creates a small helper stack called `aws-sam-cli-managed-default` with an S3 bucket for uploading your code (only the first time), uploads the build, and shows the **changeset**: the list of resources it is about to create. When it asks **Deploy this changeset? [y/N]**, type `y` TODO(verify).
+
+Watch the events scroll by as CloudFormation creates each resource. It takes a minute or two.
+
+<Checkpoint output={`CloudFormation outputs from deployed stack
+------------------------------------------------------------------
+Key                 HelloWorldApi
+Description         API Gateway endpoint URL for Prod stage for Hello World function
+Value               https://abc123defg.execute-api.ap-south-1.amazonaws.com/Prod/hello/
+...
+Successfully created/updated stack - sam-app in ap-south-1`}>
+
+The deploy ends with **Successfully created/updated stack - sam-app in ap-south-1**. Under **Outputs**, the `HelloWorldApi` value is your API's public URL. Your ID (the part before `.execute-api`) will be different.
+
+</Checkpoint>
+
+</Step>
+
+## Part 3: Try it and look inside
+
+<Step number={6} title="Call your API">
+
+Copy **your** `HelloWorldApi` URL from the outputs and call it. Replace the example URL below with yours:
+
+<Command
+  windows={`curl.exe https://abc123defg.execute-api.ap-south-1.amazonaws.com/Prod/hello/`}
+  mac={`curl https://abc123defg.execute-api.ap-south-1.amazonaws.com/Prod/hello/`}
+  linux={`curl https://abc123defg.execute-api.ap-south-1.amazonaws.com/Prod/hello/`}
+/>
+
+On Windows, type `curl.exe`, not `curl`. In Windows PowerShell, plain `curl` is a shortcut for a different command with different output.
+
+<Checkpoint output={`{"message": "hello world"}`}>
+
+Your terminal prints the JSON message from `app.py`. Paste the same URL into your browser and you see the same text. Your code is running in a data centre in Mumbai.
+
+</Checkpoint>
+
+Lost the URL? This prints it again:
+
+<Command code={`aws cloudformation describe-stacks --stack-name sam-app --query "Stacks[0].Outputs[?OutputKey=='HelloWorldApi'].OutputValue" --output text`} />
+
+</Step>
+
+<Step number={7} title="See what CloudFormation built">
+
+<ConsoleStep path="CloudFormation > Stacks > sam-app > Resources">
+
+Make sure the region in the top-right corner is **Mumbai**. Click the `sam-app` stack, then open the **Resources** tab.
+
+</ConsoleStep>
+
+Your short template became a whole set of resources TODO(verify):
+
+| Resource (logical ID) | Type | What it is |
+| --- | --- | --- |
+| `HelloWorldFunction` | `AWS::Lambda::Function` | Your Python code, ready to run |
+| `HelloWorldFunctionRole` | `AWS::IAM::Role` | The function's permissions (run and write logs) |
+| `ServerlessRestApi` | `AWS::ApiGateway::RestApi` | The public API that receives requests |
+| `ServerlessRestApiProdStage` | `AWS::ApiGateway::Stage` | The `Prod` part of your URL |
+| `ServerlessRestApiDeployment...` | `AWS::ApiGateway::Deployment` | A snapshot of the API that the stage serves |
+| `HelloWorldFunctionHelloWorldPermissionProd` | `AWS::Lambda::Permission` | Lets the API call your function |
+
+Here's what happened:
+
+1. SAM expanded your template into a full CloudFormation template.
+2. CloudFormation created a [Lambda](/services/lambda) function, an [API Gateway](/services/api-gateway) API and an [IAM](/services/iam) role, plus the glue between them, **as one stack**.
+3. Because it's one stack, it lives and dies together: update it as one, delete it as one, and if any piece fails, [CloudFormation](/services/cloudformation) rolls the whole thing back.
+
+Click the **Events** tab to see the timeline of every resource being created. You'll use this tab whenever a deploy fails, because it shows which resource failed and why.
+
+You'll also see the `aws-sam-cli-managed-default` stack in the list. That's SAM's upload bucket from step 5.
+
+</Step>
+
+<Quiz
+  question="During a deploy, CloudFormation fails to create the API after the function was already created. With rollback left on, what happens?"
+  options={["You are left with a function but no API, and must tidy up by hand", "CloudFormation rolls back and removes what it created, so the stack is all or nothing", "SAM keeps retrying until it works"]}
+  answer={1}
+  explanation="A stack is all or nothing. If one resource fails, CloudFormation undoes the others. The Events tab tells you which resource failed and why, so you can fix it and deploy again."
+/>
+
+## Part 4: Clean up
+
+<Step number={8} title="Delete everything with sam delete">
+
+<Cleanup>
+
+From inside the `sam-app` folder, run:
+
+<Command code={`sam delete`} />
+
+SAM reads the stack name and region from `samconfig.toml` and asks two questions:
+
+1. **Are you sure you want to delete the stack sam-app in the region ap-south-1?** Type `y`.
+2. **Are you sure you want to delete the folder sam-app in S3 which contains the artifacts?** Type `y`. This removes your uploaded code from SAM's bucket.
+
+<Checkpoint output={`Deleted successfully`}>
+
+The command ends with **Deleted successfully**. Refresh **CloudFormation > Stacks** in the console: `sam-app` is gone, and so are its function, API and role. Calling your old URL now fails.
+
+</Checkpoint>
+
+</Cleanup>
+
+**What about `aws-sam-cli-managed-default`?** Keep it if you plan to build Quibble: its deploy reuses this bucket. An empty or nearly empty bucket costs nothing or close to it TODO(verify). If you are completely done with SAM, empty the bucket in the S3 console, then delete the stack in CloudFormation.
+
+</Step>
+
+## Common problems
+
+- **`sam build` fails with "Binary validation failed for python".** Your laptop's Python version doesn't match the template's `Runtime:`. Go back to step 2 and make them match, then run `sam build` again.
+- **Unable to locate credentials, or an ExpiredToken error.** The CLI isn't connected to your account. Redo [Connect the AWS CLI](/setup/configure-aws-cli) and check with `aws sts get-caller-identity`.
+- **The stack is stuck in `ROLLBACK_COMPLETE` and deploy refuses to run.** A first deploy failed and rolled back. Open the stack's **Events** tab to find the first error, fix it, run `sam delete`, then deploy again.
+- **The URL returns `Missing Authentication Token`.** That's API Gateway's (confusing) way of saying "no such path". Check the URL ends in `/Prod/hello/`. More fixes: [Troubleshooting](/troubleshooting).
+
+You've deployed, tested and deleted a real serverless app. You're ready for the real thing.
+
+[Next: Pick a project to build](/projects)

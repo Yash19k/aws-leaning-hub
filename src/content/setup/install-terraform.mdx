@@ -1,0 +1,166 @@
+In this guide you install **Terraform**, the tool DropVault uses to create all of its AWS resources, and try it on a tiny example that touches nothing in AWS. Along the way you meet Terraform's most important idea, the **state file**, and learn why it must never go on GitHub. Building only Quibble? It uses SAM instead, so you can skip to [Your first deploy](/setup/first-sam-deploy). This takes about **10 minutes**.
+
+<Prerequisite slug="install-tools" />
+
+## Terraform vs SAM and CloudFormation
+
+Both are **infrastructure as code**: instead of clicking around the console, you describe your resources in files and a tool creates them. Like a recipe, the same files give the same result every time. The big difference is **who remembers what was created**.
+
+| | SAM / CloudFormation | Terraform |
+| --- | --- | --- |
+| Made by | AWS | HashiCorp |
+| Works with | AWS only | AWS and many other platforms, such as GitHub or Cloudflare |
+| You write | YAML templates | `.tf` files in a language called HCL |
+| Who remembers what exists | CloudFormation, inside AWS, as a **stack** | A **state file** on your laptop (by default) |
+| Preview changes | Change sets (`sam deploy` can show them) | `terraform plan` |
+| Delete everything | `sam delete` | `terraform destroy` |
+
+With SAM, AWS keeps track of your stack for you. With Terraform, that memory is a <Term t="state file">terraform.tfstate: a JSON file where Terraform records every resource it created and its current settings. Terraform compares it with your .tf files to work out what to change.</Term> that lives next to your code.
+
+DropVault needs **Terraform 1.5 or newer**. Its `deploy.sh` script runs `terraform apply` and then builds and uploads the web app. It keeps its state in a local file, which is why the state file matters so much.
+
+<Step number={1} title="Install Terraform">
+
+<Command
+  windows={`winget install -e --id Hashicorp.Terraform`}
+  mac={`brew tap hashicorp/tap
+brew install hashicorp/tap/terraform`}
+  linux={`wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install terraform`}
+/>
+
+- **macOS**: these are HashiCorp's official Homebrew commands, using HashiCorp's own tap.
+- **Linux**: these commands add HashiCorp's official package repository, then install from it. Copy all three lines together.
+
+</Step>
+
+<Step number={2} title="Check the version">
+
+Open a new terminal, then run:
+
+<Command code={`terraform -version`} />
+
+<Checkpoint output={`Terraform v1.x.x
+on windows_amd64`}>
+
+You see `Terraform v1.` followed by a number of **5 or higher** (for example v1.5.7 or v1.10.0). The second line names your system, such as `windows_amd64`, `darwin_arm64` or `linux_amd64`.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={3} title="Try it on a tiny example">
+
+This example creates nothing in AWS and costs nothing. It just shows you how Terraform works.
+
+Make a practice folder and move into it:
+
+<Command code={`mkdir terraform-hello
+cd terraform-hello`} />
+
+In that folder, create a file called `main.tf` with your editor (in VS Code you can run `code main.tf`) and paste this in:
+
+```hcl title="terraform-hello/main.tf"
+terraform {
+  required_version = ">= 1.5"
+}
+
+output "greeting" {
+  value = "Terraform works!"
+}
+```
+
+Now run the two commands you'll use for every Terraform project:
+
+<Command code={`terraform init
+terraform apply`} />
+
+- `terraform init` prepares the folder. In real projects it also downloads **providers**, the plugins that talk to AWS and other platforms.
+- `terraform apply` shows what it will change and asks **Do you want to perform these actions?** Type `yes` and press Enter.
+
+<Checkpoint output={`Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+greeting = "Terraform works!"`}>
+
+Terraform finishes with **Apply complete!** and prints your output. Zero resources were added, because this example only has an output.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={4} title="Meet the state file">
+
+List the files in the folder. A new file has appeared: `terraform.tfstate`.
+
+<Command code={`cat terraform.tfstate`} />
+
+It's plain JSON. Here Terraform has recorded the `greeting` output. In DropVault, this file records every bucket, table, function and role Terraform created, with their IDs and settings.
+
+Why it matters:
+
+- **Terraform uses it to plan.** Next time you run `apply`, Terraform compares your `.tf` files with the state file and changes only what's different.
+- **Lose it, and Terraform forgets.** Your resources keep running (and costing money), but Terraform no longer knows they exist. You would have to delete them by hand in the console.
+- **It can contain secrets in plain text**, such as generated passwords or keys.
+
+Keep the state file safe on your laptop, and don't delete the project folder until you've run `terraform destroy`.
+
+Done exploring? Leave the folder and delete it (nothing was created in AWS, so there's nothing to destroy):
+
+<Command
+  windows={`cd ..
+Remove-Item -Recurse -Force terraform-hello`}
+  mac={`cd ..
+rm -rf terraform-hello`}
+  linux={`cd ..
+rm -rf terraform-hello`}
+/>
+
+</Step>
+
+<Step number={5} title="Keep state and tfvars files out of Git">
+
+Two kinds of Terraform files must never be committed:
+
+- **`terraform.tfstate`** (and its backups, `terraform.tfstate.backup`): may contain secrets, and belongs to *your* deployment only.
+- **`terraform.tfvars`**: your personal settings. In DropVault that includes your email address, region and admin emails. The project ships a safe `terraform.tfvars.example` for you to copy instead.
+
+DropVault's `.gitignore` already handles both. Here is the Terraform part of it:
+
+```bash title="dropvault/.gitignore"
+# Terraform (state, cache, packaged lambdas, and YOUR real vars)
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+terraform/build/
+```
+
+Before every commit, run `git status` and make sure none of these files are listed.
+
+<Callout type="tip" title="Teams use remote state">
+
+On a team, the state file is stored in a shared place, such as an S3 bucket, so everyone works from the same copy. DropVault keeps local state to stay simple. Its `versions.tf` notes that you can add a remote backend later.
+
+</Callout>
+
+</Step>
+
+<Quiz
+  question="You deployed DropVault, then accidentally deleted terraform.tfstate. What happens?"
+  options={["Nothing. Terraform simply asks AWS what exists next time", "Terraform forgets what it created. The resources keep running, and you have to find and delete them by hand", "AWS deletes the resources automatically"]}
+  answer={1}
+  explanation="Terraform only knows about resources recorded in its state file. Without it, the resources still exist in AWS (and still cost money), but terraform destroy can no longer remove them for you."
+/>
+
+## Common problems
+
+- **Windows says `terraform` is not recognized.** Close the terminal and open a new one. winget adds Terraform to your PATH, but only new terminals see it.
+- **My version is older than 1.5.** Upgrade it: `winget upgrade -e --id Hashicorp.Terraform` on Windows, `brew upgrade hashicorp/tap/terraform` on macOS, or `sudo apt update && sudo apt install --only-upgrade terraform` on Linux.
+- **apt says the HashiCorp repository is not signed (NO_PUBKEY).** The key download in the first command failed. Run the first command again, then the other two.
+- **I committed `terraform.tfstate` or `terraform.tfvars`.** Run `git rm --cached terraform.tfstate terraform.tfvars`, add them to `.gitignore`, and commit. The old versions are still in your Git history, so change any passwords or keys they contained. More fixes: [Troubleshooting](/troubleshooting).
+
+[Next: Your first deploy](/setup/first-sam-deploy)

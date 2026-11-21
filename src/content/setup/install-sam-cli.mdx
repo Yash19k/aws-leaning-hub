@@ -1,0 +1,114 @@
+In this guide you install the **AWS SAM CLI**, the tool that builds and deploys serverless apps. Quibble deploys with it, and you will use it in the next guide for your first deploy. Building only DropVault? It uses Terraform instead, so you can skip ahead to [Install Terraform](/setup/install-terraform). This takes about **10 minutes**.
+
+<Prerequisite slug="install-tools" />
+
+## What is SAM?
+
+To understand SAM, start with <Term t="CloudFormation">The AWS service that reads a template file describing resources (functions, tables, APIs, roles) and creates them all together as one unit called a stack.</Term>. You describe your resources in a template file, and CloudFormation creates them for you as one group, called a **stack**.
+
+CloudFormation templates get long, because every resource needs every detail spelled out. **SAM** (Serverless Application Model) is a shorthand for serverless apps: a few lines describing a Lambda function and its API expand into a much longer CloudFormation template behind the scenes. It's like writing "chai for 4" instead of listing every gram of tea leaves, milk and sugar.
+
+The **SAM CLI** is the command-line tool that works with those templates:
+
+- `sam init` creates a starter project.
+- `sam build` packages your code and its dependencies.
+- `sam deploy` uploads everything and asks CloudFormation to create or update the stack.
+- `sam delete` removes the stack and everything in it.
+
+Quibble's `npm run deploy` runs `sam build` and `sam deploy` for you. It needs **SAM CLI 1.123 or newer**, because older versions can't deploy a setting its game-timer function uses.
+
+<Step number={1} title="Check whether SAM is already installed">
+
+<Command code={`sam --version`} />
+
+If you see `SAM CLI, version 1.123.0` or anything higher, skip to step 4. If the command is not found, or the version is lower, carry on.
+
+</Step>
+
+<Step number={2} title="Install the SAM CLI">
+
+<Command
+  windows={`winget install -e --id Amazon.SAM-CLI`}
+  mac={`curl -L -o aws-sam-cli.pkg "https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-macos-$(uname -m).pkg"
+sudo installer -pkg aws-sam-cli.pkg -target /`}
+  linux={`curl -L -o aws-sam-cli-linux-x86_64.zip https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip
+unzip -q aws-sam-cli-linux-x86_64.zip -d sam-installation
+sudo ./sam-installation/install`}
+/>
+
+- **Windows**: you can also download the official [64-bit MSI installer](https://github.com/aws/aws-sam-cli/releases/latest/download/AWS_SAM_CLI_64_PY3.msi) and double-click it.
+- **macOS**: this is AWS's official package installer. `uname -m` picks the Apple silicon (`arm64`) or Intel (`x86_64`) version for you. The SAM CLI needs macOS 13 or newer.
+- **Linux**: on an ARM machine, replace both `x86_64` with `arm64`. If `unzip` is missing, run `sudo apt install -y unzip` first.
+
+<Callout type="info" title="What about Homebrew?">
+
+AWS stopped maintaining its own Homebrew tap (`aws/tap/aws-sam-cli`) in September 2023. A community-maintained formula exists, but AWS recommends its own installers, like the one above.
+
+</Callout>
+
+</Step>
+
+<Step number={3} title="Open a new terminal and check the version">
+
+Close your terminal, open a new one, and run:
+
+<Command code={`sam --version`} />
+
+<Checkpoint output={`SAM CLI, version 1.xxx.x`}>
+
+You see `SAM CLI, version` followed by a number. The middle number must be **123 or higher** (for example 1.123.0 or 1.150.2). That's what Quibble needs.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={4} title="Windows only: fix PATH and long file paths">
+
+macOS and Linux users can skip this step.
+
+**If `sam` is still not recognized** in a new terminal, the installer folder may be missing from your PATH. SAM's default install folder is `C:\Program Files\Amazon\AWSSAMCLI\bin` TODO(verify). Add it for the current terminal and try again:
+
+<Command os="windows" code={`$env:Path += ";C:\\Program Files\\Amazon\\AWSSAMCLI\\bin"
+sam --version`} />
+
+If that works, add the same folder permanently: search Windows for **Edit the system environment variables**, click **Environment Variables**, select **Path**, click **Edit**, then **New**, and paste the folder.
+
+**Turn on long file paths.** `sam init` can create file paths longer than Windows allows by default, which causes confusing errors. Open **PowerShell as Administrator** (right-click PowerShell, **Run as administrator**) and run this once:
+
+<Command os="windows" code={`New-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force`} />
+
+</Step>
+
+<Step number={5} title="Know how to upgrade later">
+
+SAM gets new releases often. When a project needs a newer version, upgrade like this:
+
+<Command
+  windows={`winget upgrade -e --id Amazon.SAM-CLI`}
+  mac={`curl -L -o aws-sam-cli.pkg "https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-macos-$(uname -m).pkg"
+sudo installer -pkg aws-sam-cli.pkg -target /`}
+  linux={`curl -L -o aws-sam-cli-linux-x86_64.zip https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip
+rm -rf sam-installation
+unzip -q aws-sam-cli-linux-x86_64.zip -d sam-installation
+sudo ./sam-installation/install --update`}
+/>
+
+On macOS, the package installer simply replaces the old version. On Linux, `--update` replaces the existing install TODO(verify).
+
+</Step>
+
+<Quiz
+  question="What does SAM turn your template.yaml into when you deploy?"
+  options={["A Docker image that runs on your laptop", "A full CloudFormation template, which CloudFormation deploys as a stack", "A Terraform state file"]}
+  answer={1}
+  explanation="SAM is shorthand for CloudFormation. During deploy, SAM expands your short template into a full CloudFormation template, and CloudFormation creates every resource as one stack."
+/>
+
+## Common problems
+
+- **Windows says `sam` is not recognized.** Open a new terminal first. If it still fails, add the install folder to your PATH as shown in step 4.
+- **My version is older than 1.123.** Upgrade with the commands in step 5. If you installed SAM with the old `aws/tap` Homebrew tap, run `brew uninstall aws-sam-cli` and use the package installer instead, because that tap no longer gets updates.
+- **Linux says `unzip: command not found`.** Run `sudo apt install -y unzip`, then repeat the install commands.
+- **`sam init` fails on Windows with a path or file-name error.** Turn on long file paths (step 4), then try again in a short folder such as `C:\code`. More fixes: [Troubleshooting](/troubleshooting).
+
+[Next: Install Terraform](/setup/install-terraform)

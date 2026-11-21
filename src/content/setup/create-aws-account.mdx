@@ -1,0 +1,185 @@
+In this guide you create your own AWS account. Everything you build in this course lives in it. Along the way you will learn why AWS asks for a card, what you get for free, and who the all-powerful **root user** is. It takes about **15 minutes**, plus a short wait while AWS activates the account.
+
+<Callout type="info" title="Keep these next to you">
+
+- **An email address you will still use in five years.** Avoid your college email: it may stop working after you graduate, and this email is the key to your account.
+- **A mobile phone** that can receive an SMS or a voice call.
+- **A debit or credit card** that allows online payments. Many Indian cards have online or international payments switched off by default. Turn them on in your bank's app before you start.
+- **An ID document** if your address is in India: a PAN card, voter ID or driving license. AWS must check your identity before you can use its services.
+
+</Callout>
+
+<Step number={1} title="Pick the right way to sign up">
+
+AWS currently offers two ways to sign up TODO(verify):
+
+- **Sign up for AWS (new)** creates a simplified setup called a *project*. There is no root user, and AWS picks the <Term t="region">A geographic area where AWS runs data centres, like Mumbai (ap-south-1) or Sydney (ap-southeast-2). Your resources live in the region you choose.</Term> for you based on your country. For an address in India, that is Sydney, not Mumbai TODO(verify).
+- **Sign up for AWS (advanced)** creates a classic, standalone AWS account with a root user. You choose any region you like.
+
+**Use Sign up for AWS (advanced) for this course.** The next guides secure the root user and create an IAM user, and both DropVault and Quibble deploy to the Mumbai region (ap-south-1). Almost every AWS tutorial you will find online assumes this kind of account too.
+
+Open the advanced sign-up page: [signin.aws.amazon.com/signup?request_type=register](https://signin.aws.amazon.com/signup?request_type=register) TODO(verify).
+
+</Step>
+
+<Step number={2} title="Enter your email and an account name">
+
+Fill in two fields:
+
+- **Root user email address**: the long-term email from the list above.
+- **AWS account name**: a label just for you, such as `priya-learning`. You can change it later.
+
+Click **Verify email address**. AWS emails you a code. Type it in and click **Verify**.
+
+</Step>
+
+<Step number={3} title="Create the root user password">
+
+Choose a strong password. AWS requires 8 to 128 characters with at least three of these: uppercase, lowercase, numbers and symbols. It also can't match your email or account name.
+
+That email and password together are your <Term t="root user">The identity created with your AWS account. It can do everything, including closing the account and changing payment details. IAM permissions cannot limit it.</Term>. Think of the root user as the owner's master key to a flat: it opens every door, including the ones you would never give a guest. You will lock it away in the next guide and use a separate everyday user instead.
+
+<Callout type="security" title="Use a password manager">
+
+Save the password in a password manager (Bitwarden, 1Password, or the one built into your browser or phone). Never reuse a password from another site.
+
+</Callout>
+
+</Step>
+
+<Step number={4} title="Choose the Free plan or the Paid plan">
+
+AWS changed its Free Tier for new accounts in 2025 TODO(verify). You now pick a plan during sign-up. Here is how they compare, as described on the official page at the time of writing:
+
+| | Free plan | Paid plan |
+| --- | --- | --- |
+| Can you be charged? | No, unless you upgrade TODO(verify) | Yes, once your credits and free limits are used up |
+| Credits | $100 at sign-up, plus up to $100 more for trying key services TODO(verify) | The same credits TODO(verify) |
+| Which services? | Only a selection of services TODO(verify) | All services |
+| How long? | Ends after 6 months or when the credits run out, whichever comes first TODO(verify) | No end date. Credits expire after a set time TODO(verify) |
+
+<Callout type="warning" title="What happens when the Free plan ends">
+
+When the Free plan ends, AWS suspends the account. It keeps your data for 90 days, then deletes the account and everything in it, unless you upgrade to the Paid plan TODO(verify). Write the end date in your calendar.
+
+</Callout>
+
+**Our suggestion:** pick the **Free plan** if you want zero chance of a bill while you learn. You can upgrade to the Paid plan later, and your remaining credits carry over TODO(verify). Some services or quota increases may only be available on the Paid plan TODO(verify). If a project needs one, upgrade at that point.
+
+These rules change often. Always check the official [AWS Free Tier page](https://aws.amazon.com/free/) before you decide.
+
+</Step>
+
+<Step number={5} title="Enter your contact information">
+
+1. Choose **Personal** for how you plan to use AWS. Personal and business accounts have the same features.
+2. Enter your full name, phone number and address. Type your name **exactly** as it appears on your ID document, because AWS checks it later.
+3. Read the AWS Customer Agreement, tick the box and continue.
+
+If your address is in India, your agreement is with **Amazon Web Services India Private Limited (AWS India)**. Your bills are in Indian rupees (INR) instead of US dollars.
+
+</Step>
+
+<Step number={6} title="Add a card (and why AWS asks for one)">
+
+Enter your card details. You need the CVV, and your bank may send an OTP.
+
+Why does a "free" account need a card? Two honest reasons:
+
+- **To prove you are a real person.** A card is hard to fake in bulk. This stops people from creating thousands of free accounts to abuse AWS.
+- **To pay for anything beyond the free offers.** On the Free plan you are not charged unless you upgrade TODO(verify). On the Paid plan, the card pays for usage that credits and free limits don't cover.
+
+For an Indian address, AWS India charges your card **2 INR** to check it, then refunds the 2 INR after the check. Your bank may redirect you to its own page to approve it.
+
+You may also see **Do you have a PAN?** Choose **Yes** and enter it if you want it printed on your tax invoices, or **No** to skip. Then click **Verify and continue**.
+
+<Callout type="tip" title="Card tips">
+
+- Turn on online and international payments for the card first. This is the most common reason a card is declined.
+- Prepaid and some virtual cards may be rejected TODO(verify). A regular debit or credit card works best.
+- Using a parent's card? Tell them first, and show them the billing alarm you will set up in guide 3.
+
+</Callout>
+
+</Step>
+
+<Step number={7} title="Confirm your identity">
+
+If your address is in India, Indian rules (from CERT-In) require AWS to verify who you are before you can use its services. On the **Confirm your identity** page:
+
+1. Pick your **primary purpose** for the account (for example, learning or personal projects) TODO(verify).
+2. For ownership type, choose that the account belongs to **an individual** TODO(verify).
+3. Pick a document: **PAN card**, **voter ID** or **driving license**, and type its details. The name must match the document exactly.
+
+Then verify your phone:
+
+1. Choose **Text message (SMS)** or **Voice call**.
+2. Enter your mobile number and complete the security check.
+3. Type the 4-digit PIN you receive and click **Continue**.
+
+AWS emails you the result of the identity check after sign-up. You must pass it before you can use AWS services.
+
+</Step>
+
+<Step number={8} title="Pick the free Basic support plan">
+
+AWS asks which support plan you want. Choose **Basic support - Free** TODO(verify). The other plans cost money every month and are meant for companies running production systems TODO(verify).
+
+Basic support still gives you help with billing and account questions, plus the documentation and forums.
+
+Click **Complete sign up**.
+
+</Step>
+
+<Step number={9} title="Wait for activation, then sign in">
+
+AWS now activates your account. This usually takes a few minutes but can take up to 24 hours. Watch your inbox (and spam folder) for:
+
+- an email saying your account is **activated**, and
+- if your address is in India, the result of your **identity verification**.
+
+Then sign in:
+
+1. Go to [console.aws.amazon.com](https://console.aws.amazon.com/).
+2. Choose **Root user** and enter your email TODO(verify).
+3. Enter your password.
+
+<Checkpoint>
+
+You see **Console Home**. Your account name is in the top-right corner, and a region name (such as **Mumbai** or **N. Virginia**) is next to it. If AWS asks you to set up MFA right away, that's expected: the next guide walks you through it.
+
+</Checkpoint>
+
+</Step>
+
+## What is free, exactly?
+
+Free on AWS comes in a few flavours. Here is the short version for accounts created under the new rules TODO(verify):
+
+- **Always free**: more than 30 services have a monthly free allowance that never expires, on both plans TODO(verify). For example, AWS Lambda gives you a number of free requests every month TODO(verify).
+- **Credits**: money AWS gives you to spend on usage beyond those free allowances. You get some at sign-up and can earn more by trying services in the console TODO(verify).
+- **Short-term trials**: some services on the Paid plan have a limited free trial TODO(verify).
+
+If your account was created **before** the 2025 change, the older Free Tier applies instead: many services were free for the first 12 months, with limits TODO(verify).
+
+<Callout type="cost" title="Free has limits">
+
+Every free offer has a limit: a number of requests, gigabytes or hours per month. Go over it and you use up credits (or pay, on the Paid plan). The [official Free Tier page](https://aws.amazon.com/free/) lists the current limits for each service. In guide 3 you set up email alerts so you always know where you stand.
+
+</Callout>
+
+<Quiz
+  question="You picked the Free plan. Which of these is true?"
+  options={["It lasts forever, as long as you stay under the limits", "It ends after a set time or when your credits run out, so you should note the end date", "It gives you every AWS service with no limits"]}
+  answer={1}
+  explanation="The Free plan ends after a set period or when credits run out, whichever comes first. After that you must upgrade to keep the account. Check the official Free Tier page for the current numbers."
+/>
+
+## Common problems
+
+- **My card was declined.** Turn on online and international payments in your bank's app, then try again. If it still fails, try a different card.
+- **The verification email never arrived.** Check your spam and promotions folders, then use the option to resend the code.
+- **The phone PIN never arrived.** Go back and choose **Voice call** instead of SMS. Check you picked the right country code (+91 for India).
+- **My account still isn't active after 24 hours.** Check your email for a request to finish identity verification. Then contact AWS Support from the sign-in page TODO(verify). See [Troubleshooting](/troubleshooting) for more fixes.
+
+[Next: Lock down the root user](/setup/secure-your-account)

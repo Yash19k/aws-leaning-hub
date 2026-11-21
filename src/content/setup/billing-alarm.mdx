@@ -1,0 +1,117 @@
+A forgotten resource or a leaked key can quietly cost money. In this guide you set up **AWS Budgets** to email you the moment spending starts, check that Free Tier usage alerts are on, and learn to read the Billing dashboard so you can find what is costing money. It takes about **10 minutes**, and it's the best 10 minutes you will spend on AWS.
+
+<Callout type="warning" title="Budgets alert you. They do not stop spending.">
+
+A budget is a smoke alarm, not a sprinkler. When it goes off, your resources keep running (and costing money) until **you** delete them. Billing data also lags behind real usage, so an alert can arrive hours after the spending started TODO(verify). Standard AWS accounts have no switch that says "stop everything at 500 INR" TODO(verify).
+
+</Callout>
+
+<Step number={1} title="Open Billing and Cost Management">
+
+Sign in to the console. Root is fine for this guide, because you haven't created your everyday user yet.
+
+Type **Billing** in the search bar at the top and open **Billing and Cost Management**. Billing is global, so it doesn't matter which region is selected.
+
+</Step>
+
+<Step number={2} title="Create a zero-spend budget">
+
+This budget emails you as soon as you spend even a little beyond the free allowances.
+
+<ConsoleStep path="Billing and Cost Management > Budgets > Create budget">
+
+1. Under **Budget setup**, choose **Use a template (simplified)**.
+2. Under **Templates**, choose **Zero spend budget**.
+3. Keep the suggested budget name or type your own, such as `zero-spend`.
+4. Under **Email recipients**, type your email address TODO(verify).
+5. Click **Create budget**.
+
+</ConsoleStep>
+
+If you have credits, this alert may fire even when credits cover the cost TODO(verify). That's fine: treat it as an early warning to check what is running.
+
+</Step>
+
+<Step number={3} title="Create a monthly cost budget">
+
+The zero-spend alert tells you *that* you are spending. A monthly budget tells you *how much*.
+
+<ConsoleStep path="Billing and Cost Management > Budgets > Create budget">
+
+1. Choose **Use a template (simplified)**, then **Monthly cost budget**.
+2. Name it, for example `monthly-limit`.
+3. Set **Budgeted amount** to a number you are comfortable with, such as `5` (US dollars) TODO(verify).
+4. Add your email under **Email recipients**.
+5. Click **Create budget**.
+
+</ConsoleStep>
+
+The template emails you when your actual spend reaches 85% and 100% of the amount, and when AWS **forecasts** you will go over 100% TODO(verify). The forecast alert is useful: it warns you before the month ends.
+
+<Callout type="cost" title="Do budgets cost money?">
+
+A couple of simple budgets like these should not cost anything TODO(verify). Check the [AWS Budgets pricing page](https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/) if you plan to create many.
+
+</Callout>
+
+</Step>
+
+<Step number={4} title="Check that Free Tier usage alerts are on">
+
+AWS can also email you when you have used **85%** of a service's free allowance. This is switched on automatically for individual accounts, but check it and pick where the emails go.
+
+<ConsoleStep path="Billing and Cost Management > Billing preferences > Alert preferences > Edit">
+
+1. Make sure **Receive AWS Free Tier alerts** is ticked.
+2. Type the email address that should receive the alerts.
+3. Click **Update**.
+
+</ConsoleStep>
+
+On the **Free plan**, AWS also emails you about your credit balance and when your plan is close to ending.
+
+</Step>
+
+<Step number={5} title="Learn to read the Billing dashboard">
+
+Spend two minutes clicking around, so you know where to look when an alert arrives:
+
+- **Home**: your month-to-date cost, a forecast for the month, and the services costing the most TODO(verify).
+- **Bills**: charges broken down by **service** and by **region**. This is the page to open when you want to know exactly what is costing money and where it runs.
+- **Credits**: your remaining credits and when they expire.
+- **Free Tier**: on the Paid plan, your usage of each service against its free limit.
+- **Console Home** (outside Billing): on the Free plan, it shows your credit balance and how many days the plan has left.
+
+<Checkpoint>
+
+The **Budgets** page lists your two budgets, `zero-spend` and `monthly-limit`, with your email as the recipient. The Billing home page shows a cost of 0 (or very close to it) for this month.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={6} title="Make checking costs a habit">
+
+Alerts are your safety net, but habits are what keep bills at zero:
+
+- Open the **Bills** page after every deploy and again after every cleanup.
+- Check every **region** in the Bills page, not just Mumbai. A charge in a region you never use is a red flag.
+- When a budget email arrives, act the same day: find the resource and delete it.
+
+</Step>
+
+<Quiz
+  question="Your monthly budget email says you have reached 100% of your amount. What has AWS done to your resources?"
+  options={["Stopped them automatically", "Nothing. They keep running and costing money until you delete them", "Deleted them to protect you"]}
+  answer={1}
+  explanation="Budgets only send alerts. They never stop or delete anything, so you must find and remove the resource yourself."
+/>
+
+## Common problems
+
+- **Billing pages say Access denied when I sign in as my IAM user (after guide 4).** By default, only the root user may be able to see billing. Sign in as root, open your account name (top right) > **Account**, find **IAM user and role access to Billing information**, click **Edit** and activate it TODO(verify).
+- **I never get any alert emails.** Check spam, then open the budget and check the email address for typos. AWS also needs some spending (or forecast spending) to trigger an alert, so silence is usually good news.
+- **The budget still shows charges after I deleted everything.** Billing data lags by hours. If charges keep growing the next day, use the **Bills** page to find the service and region that is still running.
+- **I see charges in a region I never used.** Someone may have your access key. Follow the leaked-key steps in [Create your working user](/setup/iam-user-and-keys) right away, then see [Troubleshooting](/troubleshooting).
+
+[Next: Create your working user](/setup/iam-user-and-keys)

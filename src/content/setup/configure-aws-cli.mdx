@@ -1,0 +1,156 @@
+Your AWS CLI is installed, but it doesn't know who you are yet. In this guide you give it your access key, choose a default region (Mumbai is closest for India), and prove the connection works with one command. Terraform, SAM and both projects' scripts read the same settings, so you only do this once. It takes about **10 minutes**.
+
+<Prerequisite slug="iam-user-and-keys" />
+<Prerequisite slug="install-tools" />
+
+<Step number={1} title="Get your access key ready">
+
+Find the **access key ID** (starts with `AKIA`) and **secret access key** you saved in [Create your working user](/setup/iam-user-and-keys). Keep them in your password manager or the downloaded `.csv` file, ready to copy.
+
+Lost the secret? Create a new access key for your IAM user and delete the old one. AWS never shows a secret twice.
+
+</Step>
+
+<Step number={2} title="Choose your region">
+
+A <Term t="region">A geographic area where AWS runs a cluster of data centres. Each region has a code, such as ap-south-1 for Mumbai.</Term> is where your resources physically run. Most resources live in exactly one region, so picking one default saves a lot of confusion.
+
+**Use `ap-south-1` (Asia Pacific, Mumbai)** if you are in India:
+
+- **It's close.** Requests travel a shorter distance, so your apps respond faster (lower latency).
+- **The projects expect it.** DropVault's example settings use ap-south-1, and so do this course's project guides.
+- **It has the services you need.** Everything in this course runs there.
+
+Prices differ slightly between regions TODO(verify). For the small amounts in this course, the difference doesn't matter.
+
+</Step>
+
+<Step number={3} title="Run aws configure">
+
+<Command code={`aws configure`} />
+
+The CLI asks four questions. Paste your answer and press Enter after each:
+
+```text
+AWS Access Key ID [None]: AKIAIOSFODNN7EXAMPLE
+AWS Secret Access Key [None]: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+Default region name [None]: ap-south-1
+Default output format [None]: json
+```
+
+What each one means:
+
+1. **AWS Access Key ID**: the public half of your key, like a username.
+2. **AWS Secret Access Key**: the private half, like a password. Paste it carefully, with no spaces before or after.
+3. **Default region name**: `ap-south-1`. Commands go here unless you say otherwise.
+4. **Default output format**: `json`. Results come back as JSON, which is easy to read and easy for scripts to use. (Other options are `table`, `text` and `yaml`.)
+
+The keys above are AWS's official placeholder examples. Use your own.
+
+</Step>
+
+<Step number={4} title="Prove it works">
+
+Ask AWS who you are. This command is free, changes nothing, and works even with no permissions at all.
+
+<Command
+  code={`aws sts get-caller-identity`}
+  output={`{
+    "UserId": "AIDAEXAMPLEUSERID1234",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/dev-admin"
+}`}
+/>
+
+<Checkpoint>
+
+You see JSON with three fields. **Account** is your own 12-digit account ID (not `123456789012`), and **Arn** ends in `user/dev-admin` (or whatever you named your IAM user). If it ends in `root`, you configured a root key by mistake: delete that key and use your IAM user's key instead.
+
+</Checkpoint>
+
+An <Term t="ARN">Amazon Resource Name: a unique ID for anything in AWS, written like arn:aws:service:region:account:resource.</Term> is AWS's full name for a resource. You'll see ARNs everywhere.
+
+</Step>
+
+<Step number={5} title="Peek at where the settings live">
+
+`aws configure` wrote two small text files in a hidden `.aws` folder in your home folder:
+
+- **Windows**: `C:\Users\<your-name>\.aws\` (in PowerShell, that's `$HOME\.aws`)
+- **macOS and Linux**: `~/.aws/`
+
+```ini title="~/.aws/credentials"
+[default]
+aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+```ini title="~/.aws/config"
+[default]
+region = ap-south-1
+output = json
+```
+
+The `credentials` file holds secrets. The `config` file holds settings. Both sit outside every project folder, which is exactly why your keys never end up in Git. Never copy these files into a project.
+
+To see what the CLI is using right now, run:
+
+<Command code={`aws configure list`} />
+
+</Step>
+
+<Step number={6} title="Optional: use named profiles">
+
+The `[default]` you saw is a **profile**: a named set of credentials and settings. You can have several, for example one for your own account and one for a club account.
+
+Create a second profile called `club`:
+
+<Command code={`aws configure --profile club`} />
+
+Use it for one command with `--profile`:
+
+<Command code={`aws sts get-caller-identity --profile club`} />
+
+Or make it the default for the current terminal window with the `AWS_PROFILE` environment variable:
+
+<Command
+  windows={`$env:AWS_PROFILE = "club"
+aws sts get-caller-identity`}
+  mac={`export AWS_PROFILE=club
+aws sts get-caller-identity`}
+  linux={`export AWS_PROFILE=club
+aws sts get-caller-identity`}
+/>
+
+How the projects pick a profile:
+
+- **DropVault**: its `terraform.tfvars` has an `aws_profile` setting. Leave it empty to use your default profile.
+- **Quibble**: its scripts use your default profile and region, or whatever `AWS_PROFILE` and `AWS_REGION` say.
+
+If you only have one AWS account, you can ignore profiles and stick with `default`.
+
+</Step>
+
+<Step number={7} title="Set the console to Mumbai too">
+
+The CLI and the console keep separate region settings. Sign in to the console as your IAM user, click the region name in the top-right corner, and choose **Asia Pacific (Mumbai) ap-south-1**.
+
+Now the resources you create from the terminal show up when you look in the console.
+
+</Step>
+
+<Quiz
+  question="You deployed something with the CLI, but you can't find it in the console. What is the most likely reason?"
+  options={["The deploy secretly failed", "The console is showing a different region from the one you deployed to", "The console only shows resources created by the root user"]}
+  answer={1}
+  explanation="Most resources live in one region, and the console only shows the region selected in the top-right corner. Switch it to the region you deployed to (ap-south-1)."
+/>
+
+## Common problems
+
+- **Unable to locate credentials.** The CLI has no key. Run `aws configure` again, or check you are using the right profile. See [the troubleshooting entry](/troubleshooting#unable-to-locate-credentials).
+- **InvalidClientTokenId or SignatureDoesNotMatch.** The key was pasted wrongly (often with an extra space or a missing character), or it was deleted. Run `aws configure` and paste both values again carefully, or create a new key.
+- **You must specify a region.** You left the region empty. Run `aws configure` and enter `ap-south-1` (press Enter to keep the other answers).
+- **The command works in one terminal but not another.** A different terminal may have `AWS_PROFILE` set, or be a different user. Run `aws configure list` in both to compare. More fixes: [Troubleshooting](/troubleshooting).
+
+[Next: Install the SAM CLI](/setup/install-sam-cli)

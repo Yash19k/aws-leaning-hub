@@ -1,0 +1,120 @@
+Your root user can do anything in your account, including running up a huge bill or deleting everything. In this guide you protect it with <Term t="MFA">Multi-factor authentication: after your password, you also prove you have a specific device, such as a code from an app on your phone or a passkey.</Term>, store your recovery details safely, and then put the root user away for good. It takes about **10 minutes**.
+
+## Why you never use root day to day
+
+- **It has no limits.** IAM permissions cannot restrict the root user. It can close the account, change the card and delete every resource.
+- **A stolen root password means a stolen account.** Attackers try leaked passwords from other websites all the time.
+- **Mistakes are bigger.** A typo while signed in as root has no safety net.
+
+So you protect root with MFA, lock it away, and do your daily work as a separate IAM user (you create it in guide 4). It's like a bank locker: you keep the master key in the locker and carry a normal key around.
+
+<Step number={1} title="Sign in as the root user">
+
+Go to [console.aws.amazon.com](https://console.aws.amazon.com/), choose **Root user**, and sign in with your email and password.
+
+If AWS asks you to register an MFA device straight away, follow its prompts. They lead to the same screens as step 3. AWS now requires MFA for root users and may insist on it at sign-in TODO(verify).
+
+</Step>
+
+<Step number={2} title="Choose your second factor">
+
+You need something you always have with you. Pick one:
+
+- **Authenticator app** (easiest): a free phone app such as Google Authenticator or Microsoft Authenticator. It shows a new 6-digit code every 30 seconds.
+- **Passkey**: uses your phone or laptop's fingerprint, face or PIN (for example Windows Hello, Touch ID, or a passkey saved in Google Password Manager or iCloud Keychain).
+- **Hardware security key**: a small USB or NFC key, such as a YubiKey. Very secure, but you have to buy one.
+
+If you are unsure, install an authenticator app on your phone now.
+
+</Step>
+
+<Step number={3} title="Assign the MFA device">
+
+<ConsoleStep path="Your account name (top right) > Security credentials > Multi-factor authentication (MFA) > Assign MFA device">
+
+1. Type a **Device name** you will recognise, such as `priya-phone`.
+2. Choose **Authenticator app** and click **Next**.
+3. Click **Show QR code**. In your phone app, add a new account and scan the code.
+4. Type the code from the app into **MFA code 1**.
+5. Wait for the app to show a **new** code (up to 30 seconds) and type it into **MFA code 2**.
+6. Click **Add MFA**.
+
+</ConsoleStep>
+
+Submit straight after typing the second code. Codes expire quickly, and an old code can leave the device out of sync.
+
+**Using a passkey or security key instead?** Choose **Passkey or security key** in the wizard and follow your browser's prompts TODO(verify).
+
+</Step>
+
+<Step number={4} title="Add a backup MFA device">
+
+If your only MFA device is a phone and you lose it, getting back into the account is slow and painful. You can register up to **eight** MFA devices on the root user, so add a second one now.
+
+Good backup options:
+
+- A passkey on your laptop, if your first device is a phone app.
+- The authenticator app on a second phone or tablet you keep at home.
+- A hardware security key kept somewhere safe.
+
+Repeat step 3 with the second device and a different device name.
+
+</Step>
+
+<Step number={5} title="Test it: sign out and back in">
+
+Click your account name (top right) and choose **Sign out**. Then sign in again as the root user.
+
+<Checkpoint>
+
+After your password, AWS asks for an MFA code (or your passkey). You enter it and land on Console Home. Back on the **Security credentials** page, your device is listed under **Multi-factor authentication (MFA)**.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={6} title="Store your recovery details safely">
+
+Lock these away now, while you remember them:
+
+- **Root password**: in your password manager, not in a notes app or a photo.
+- **The root email account**: turn on two-step verification for that email too. Anyone who controls the email can reset your root password.
+- **Your phone number**: keep it current in your AWS account's contact information. AWS may call it to verify you if you lose your MFA device TODO(verify).
+- **Your 12-digit account ID**: click your account name (top right) to see it, and save it next to the password. You need it to sign in as an IAM user later.
+
+If you ever lose every MFA device, look for the option to **sign in using alternative factors** on the MFA screen. AWS then verifies your email address and phone number TODO(verify).
+
+</Step>
+
+<Step number={7} title="Check root has no access keys, then put it away">
+
+On the same **Security credentials** page, find the **Access keys** section. It should say you have no access keys. If you see one, choose **Actions** and delete it TODO(verify).
+
+Root access keys are the most dangerous credentials in AWS: anyone who gets one can do anything, from code, without MFA.
+
+Now sign out. From here on, you only sign in as root for rare account-level tasks, such as:
+
+- changing the root email, password or account name,
+- changing the support plan,
+- closing the account,
+- turning on IAM user access to billing (guide 3 explains when you need this).
+
+Everything else, including every deploy in this course, uses the IAM user you create in guide 4.
+
+</Step>
+
+<Quiz
+  question="Once this guide is done, when should you sign in as the root user?"
+  options={["Every day, because it has all the permissions you need for deploys", "Only for rare account-level tasks, like changing the support plan or closing the account", "Whenever a classmate needs to help you debug something"]}
+  answer={1}
+  explanation="Root has no limits, so you keep it locked away behind MFA. Daily work, including CLI deploys, uses an IAM user. Never share root credentials with anyone."
+/>
+
+## Common problems
+
+- **AWS rejects my MFA codes.** Your phone's clock may be off. Turn on automatic date and time in your phone settings, then try again with two fresh, back-to-back codes.
+- **I lost my phone and had no backup device.** On the MFA sign-in screen, use the option to sign in with alternative factors (email and phone) TODO(verify). If that fails, contact AWS Support.
+- **The passkey prompt does nothing.** Try another browser (Chrome, Edge or Safari), or use an authenticator app instead.
+- **AWS forces me to set up MFA before I can do anything.** That is expected. Finish step 3 and you are through. More fixes: [Troubleshooting](/troubleshooting).
+
+[Next: Set a billing alarm](/setup/billing-alarm)

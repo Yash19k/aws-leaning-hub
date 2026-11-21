@@ -1,0 +1,120 @@
+API Gateway gives your backend a public HTTPS (or WebSocket) address. A browser sends a request to that address, API Gateway checks it (is the route real? is the caller allowed? are they sending too fast?), then hands it to a Lambda function and passes the answer back.
+
+Without it, your Lambda functions would have no friendly URL, no rate limiting and no shared place to handle CORS and sign-in checks.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Putting a public HTTPS API in front of Lambda functions",
+    "Real-time apps (games, chat, live polls) where the server must push messages to browsers: use a WebSocket API",
+    "Checking tokens once, in front of many routes, with an authorizer",
+    "Capping traffic with throttling so a bug or a bot can't run up a bill",
+  ]}
+  avoid={[
+    "Serving static website files: use S3 with CloudFront or Amplify Hosting",
+    "Spreading traffic across a fleet of containers or servers you run: use an Application Load Balancer",
+    "One function that just needs a quick HTTPS link and nothing else: a Lambda function URL may be enough TODO(verify)",
+  ]}
+/>
+
+## Three kinds of API
+
+| | REST API | HTTP API | WebSocket API |
+| --- | --- | --- | --- |
+| Shape | Request, then response | Request, then response | A connection that stays open both ways |
+| Strengths | Most features: API keys, usage plans, request validation, TOKEN and REQUEST authorizers | Simpler and cheaper, built-in CORS settings, JWT authorizers TODO(verify) | The server can push messages at any time |
+| Used by | DropVault | Quibble (`/api/*`) | Quibble (gameplay) |
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Routes and integrations">A **route** is a method plus a path, like `POST /v1/users/{user_id}/files`. The **integration** says what handles it. With a **Lambda proxy** integration, the whole request arrives in your function as the `event` and your return value becomes the response.</Concept>
+  <Concept title="Stages and deployments">A **stage** is a named, live version of the API with its own URL, like `/dev` or `prod`. REST APIs need a fresh **deployment** before changes go live; HTTP APIs usually auto-deploy to a `$default` stage.</Concept>
+  <Concept title="Throttling">Limits on requests per second (the steady **rate**) and how many can arrive at once (the **burst**). Requests over the limit get `429 Too Many Requests` instead of reaching your Lambda.</Concept>
+  <Concept title="CORS">Browsers block a page on one domain from calling an API on another unless the API says it's allowed. Before risky requests the browser sends an `OPTIONS` **preflight**, and the API must answer with the right `Access-Control-Allow-*` headers.</Concept>
+  <Concept title="Authorizers">A check that runs before your route. A **Lambda authorizer** is your own function that looks at a token and returns allow or deny; API Gateway can cache the answer. HTTP APIs can also verify standard JWTs themselves.</Concept>
+  <Concept title="WebSocket routes and PostToConnection">A WebSocket API has special routes: `$connect`, `$disconnect` and `$default` (anything else). Each socket gets a **connection ID**. To push a message, your Lambda calls `PostToConnection` with that ID.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault: a REST API
+
+[DropVault](/projects/dropvault) builds a REST API called `enclave-dev-api` with a `dev` stage, entirely in Terraform.
+
+- **A tree of resources** under `/v1`: `/v1/users/{user_id}/files/{file_id}/complete`, `/download`, `/share`, `/parts`, plus `/v1/login`, `/v1/d/{code}` for public short links, and `/v1/admin/{proxy+}`.
+- **A TOKEN authorizer** reads the `Authorization: Bearer ...` header and runs the `authorizer` Lambda. The answer is cached per token for `authorizer_cache_seconds` (300 by default). If the token is bad, the Lambda raises exactly `Unauthorized`, which API Gateway turns into a 401.
+- **CORS done by hand.** Every browser-facing resource gets an `OPTIONS` method with a MOCK integration (API Gateway answers it without calling Lambda). Gateway responses add CORS headers to API Gateway's own 4xx and 5xx errors too; otherwise the browser would hide a 401 from the app and it couldn't renew the session.
+- **Stage-wide throttling** of 50 requests per second with a burst of 100, to slow down password guessing and email spam.
+
+### Quibble: an HTTP API and a WebSocket API
+
+[Quibble](/projects/quibble) uses both of the newer API types, defined in its SAM template.
+
+- **HTTP API.** One catch-all route, `ANY /api/{proxy+}`, sends every REST call (login, leaderboards, admin) to the `api` Lambda. CORS is a few lines of config (`CorsConfiguration`) listing the site's own origins. Access logs go to CloudWatch as JSON.
+- **WebSocket API.** `$connect` runs `ws-connect`, which checks the JWT passed as `?token=` and refuses the socket with a 401 if it's bad. `$default` runs `ws-message` for every game action, and `$disconnect` marks the player offline.
+- **Pushing to 250 phones.** Lambdas don't hold sockets. They call the API Gateway Management API's `PostToConnection` for each connection ID stored on a game's member items, which needs the `execute-api:ManageConnections` permission.
+- **Throttles with headroom.** Both APIs allow 1,000 requests per second with a 2,000 burst, because 250 answers can land in the same 100 ms.
+- **Fair timing.** Answer speed is measured from API Gateway's own arrival time (`requestTimeEpoch`), so a slow Lambda never costs a player points.
+
+## Try it
+
+REST APIs and the newer HTTP and WebSocket APIs live in two different CLI groups:
+
+<Command code={`aws apigateway get-rest-apis
+aws apigatewayv2 get-apis`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How API Gateway is billed">
+
+REST and HTTP APIs are billed per million requests, and HTTP APIs cost noticeably less per request TODO(verify). WebSocket APIs are billed per million messages plus per million connection-minutes TODO(verify).
+
+- The classic Free Tier included a monthly allowance of API calls, WebSocket messages and connection minutes for the first 12 months TODO(verify).
+- Throttled requests (429s) are refused before reaching your Lambda, which also protects your Lambda bill.
+- Quibble's README notes its every-minute uptime probe adds HTTP API calls and WebSocket handshakes that cost a few cents a month TODO(verify).
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="api-gateway-1"
+  question="Quibble's server needs to tell 250 browsers that a question has closed. Which API type makes that possible?"
+  options={[
+    "A REST API with a longer timeout",
+    "An HTTP API with CORS",
+    "A WebSocket API, with Lambdas calling PostToConnection",
+  ]}
+  answer={2}
+  explanation="Only a WebSocket API keeps a connection open, so the server can send messages without the browser asking first. Lambdas push through `PostToConnection` with each socket's connection ID."
+/>
+
+<Quiz
+  id="api-gateway-2"
+  question="DropVault's API sometimes answers a request with 429 Too Many Requests. What caused it?"
+  options={[
+    "The stage-wide throttle (50 per second, burst 100) was exceeded",
+    "The Lambda authorizer rejected the token",
+    "The S3 bucket is full",
+    "CORS is misconfigured",
+  ]}
+  answer={0}
+  explanation="429 is API Gateway's throttling answer. A rejected token gives 401, and a CORS problem shows up as a blocked request in the browser."
+/>
+
+<Quiz
+  id="api-gateway-3"
+  question="Why does DropVault add CORS headers to API Gateway's own 4xx and 5xx error responses?"
+  options={[
+    "To make errors load faster",
+    "Without them the browser hides the 401 from the app, so it can't tell the session expired and renew it",
+    "API Gateway refuses to start without them",
+    "So that Lambda gets called for every error",
+  ]}
+  answer={1}
+  explanation="A rejected token is answered by API Gateway itself, not by a Lambda. If that answer lacks CORS headers, the browser blocks the web app from reading it."
+/>

@@ -1,0 +1,119 @@
+EventBridge connects "something happened" to "do this about it". AWS services constantly announce events (a stack finished deploying, an instance stopped, a file arrived) onto an **event bus**. You write a **rule** that matches the events you care about and sends them to a **target**, usually a Lambda function.
+
+Rules can also fire on a **schedule** instead of an event: every minute, every 5 minutes, or 9:00 every morning. That makes EventBridge the serverless replacement for a cron job on a server.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Running a Lambda on a timer: health checks, nightly cleanups, weekly reports",
+    "Reacting to AWS's own events, such as a CloudFormation deploy failing",
+    "Letting parts of your own app send events to each other without calling each other directly",
+  ]}
+  avoid={[
+    "A queue where jobs wait and are processed one by one with retries: use Amazon SQS",
+    "Simple fan-out of one message to email and other subscribers: use Amazon SNS",
+    "Multi-step workflows with branches, waits and error handling: use AWS Step Functions",
+    "Exact sub-second timing: schedules aim for the minute, not the millisecond TODO(verify)",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Event">A JSON object describing what happened, with fields like `source` (who sent it, e.g. `aws.cloudformation`), `detail-type` and `detail`.</Concept>
+  <Concept title="Event bus">Where events arrive. Every account has a **default** bus that AWS services send their events to. You can create your own buses for your app's events.</Concept>
+  <Concept title="Rule and event pattern">A rule holds an **event pattern**, a JSON template the event must match: 'source is aws.cloudformation AND status is ROLLBACK_COMPLETE'. Fields you leave out match anything.</Concept>
+  <Concept title="Target">What runs when the rule matches: a Lambda function, an SNS topic, an SQS queue and more. The target needs permission to be invoked by EventBridge.</Concept>
+  <Concept title="Schedules">`rate(5 minutes)` runs at a fixed interval. `cron(0 9 * * ? *)` runs at 09:00 UTC every day. Note the singular: it's `rate(1 minute)` but `rate(5 minutes)`. AWS also offers **EventBridge Scheduler**, a newer service for schedules TODO(verify).</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) uses one scheduled rule for its health check.
+
+- **A rate schedule.** `enclave-dev-health-check` runs the `monitor` Lambda every `health_check_minutes` (5 by default; `0` turns it off). Terraform even handles the singular: it writes `rate(1 minute)` when the value is 1 and `rate(N minutes)` otherwise.
+- **A Lambda permission** lets `events.amazonaws.com` invoke the monitor, limited to that one rule's ARN.
+- **The old name lives on.** EventBridge grew out of **CloudWatch Events**, which is why the Terraform resources are still called `aws_cloudwatch_event_rule` and `aws_cloudwatch_event_target`.
+
+### Quibble
+
+[Quibble](/projects/quibble) wires two EventBridge triggers to its `monitor` function, both as SAM `Events`.
+
+- **Uptime probes every minute.** A `Schedule` event with `rate(1 minute)` makes the monitor load the website, call `/api/health` and try a WebSocket handshake. The handler spots these events by `detail-type: Scheduled Event`.
+- **An event pattern on its own deploys.** A rule matches CloudFormation's stack status events for this one stack:
+
+```yaml title="aws/template.yaml"
+        DeployFailed:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.cloudformation]
+              detail-type: [CloudFormation Stack Status Change]
+              detail:
+                stack-id: [!Ref AWS::StackId]
+                status-details:
+                  status: [UPDATE_ROLLBACK_COMPLETE, UPDATE_ROLLBACK_FAILED, UPDATE_FAILED, ROLLBACK_COMPLETE, ROLLBACK_FAILED, DELETE_FAILED]
+```
+
+When a deploy fails or rolls back, the monitor reads the stack's events and emails which resource failed and why.
+
+## Try it
+
+List the rules on your default event bus:
+
+<Command code={`aws events list-rules --query "Rules[].[Name,ScheduleExpression,State]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How EventBridge is billed">
+
+Events that AWS services send to the default bus are generally free; custom events you publish, and events sent across accounts, are billed per million TODO(verify). Scheduled rules have long been free to run TODO(verify). EventBridge Scheduler is priced separately per invocation, with a free monthly allowance TODO(verify).
+
+The real cost of a schedule is what it triggers: a Lambda every minute is about 43,000 runs a month (Quibble's README), which still fits Lambda's free allowance TODO(verify).
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="eventbridge-1"
+  question="Which schedule expression runs a rule every 5 minutes?"
+  options={[
+    "every(5m)",
+    "cron(5)",
+    "rate(5 minutes)",
+    "rate(5 minute)",
+  ]}
+  answer={2}
+  explanation="Rate expressions use a plural unit for values above 1: `rate(5 minutes)`, but `rate(1 minute)`. DropVault's Terraform handles exactly this."
+/>
+
+<Quiz
+  id="eventbridge-2"
+  question="How does Quibble find out that one of its own deploys has failed?"
+  options={[
+    "The developer checks the console every hour",
+    "An EventBridge rule matches the stack's CloudFormation status events and invokes the monitor Lambda",
+    "SAM sends a text message",
+  ]}
+  answer={1}
+  explanation="CloudFormation publishes `CloudFormation Stack Status Change` events to the default bus. Quibble's rule filters for this stack and failure statuses only."
+/>
+
+<Quiz
+  id="eventbridge-3"
+  question="Why are DropVault's EventBridge resources named aws_cloudwatch_event_rule in Terraform?"
+  options={[
+    "EventBridge evolved from CloudWatch Events, and the Terraform resource kept the old name",
+    "DropVault uses CloudWatch alarms instead of EventBridge",
+    "It's a typo in the project",
+    "Terraform can't create EventBridge rules",
+  ]}
+  answer={0}
+  explanation="EventBridge started life as CloudWatch Events. The API and the Terraform resource names still carry the old name."
+/>

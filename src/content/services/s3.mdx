@@ -1,0 +1,115 @@
+S3 (Simple Storage Service) is where AWS keeps files. It isn't a hard disk you mount: you send a file in with an HTTPS request and get it back the same way. Each file is an **object**, stored under a name called a **key**, inside a **bucket**. S3 scales by itself, so a bucket with ten files and one with ten million work the same way.
+
+S3 is private by default. Nobody, not even another AWS service, can read your objects until a policy or a signed link says so.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "User uploads: photos, PDFs, videos, any size",
+    "Hosting the built files of a website (HTML, JS, CSS), usually behind CloudFront",
+    "Backups, logs and exports that you want to keep cheaply for a long time",
+    "Handing a browser a temporary upload or download link, so the file never passes through your Lambda",
+  ]}
+  avoid={[
+    "Data you query by field or update a few bytes at a time: use DynamoDB",
+    "A disk an app writes to like a normal filesystem: use EBS (for one server) or EFS (shared)",
+    "Serving a public site over HTTPS on your own domain straight from S3: put CloudFront or Amplify Hosting in front",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Bucket">A top-level container for objects. Its name must be unique across all of AWS, which is why DropVault adds your account ID to its bucket name.</Concept>
+  <Concept title="Object and key">An object is the file plus metadata (like `Content-Type`). The key is its full name, such as `user-123/file-456/notes.pdf`. There are no real folders: the slashes are just part of the key, and the console draws them as folders.</Concept>
+  <Concept title="Presigned URLs">A normal S3 URL with a signature attached, made by code that has permission. Anyone holding it can do that one action (upload or download one object) until it expires. Like a single-use visitor pass.</Concept>
+  <Concept title="Block Public Access and bucket policies">**Block Public Access** is a safety switch that stops anything in the bucket from being made public by mistake. A **bucket policy** is a JSON document on the bucket that says who may do what, for example only CloudFront may read.</Concept>
+  <Concept title="Storage classes and lifecycle rules">Storage classes trade price against access speed: Standard for everyday files, Infrequent Access and Glacier classes for things you rarely open. **Lifecycle rules** move or delete objects automatically, for example after 30 days.</Concept>
+  <Concept title="Multipart upload">Big files go up in numbered parts that S3 stitches together at the end. A dropped connection only costs the part in flight, and a single PUT tops out at 5 GB TODO(verify).</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) stores every shared file in one private bucket, named `enclave-dev-files-<account id>` by default.
+
+- **Keys that never collide.** Each file lives at `{user_id}/{file_id}/{file_name}`, so two people can both upload `notes.pdf`.
+- **Bytes never touch Lambda.** The upload Lambda returns a presigned PUT URL (valid 1 hour) and the browser sends the file straight to S3. Files over 100 MB use a **multipart upload** instead: parts of at least 16 MiB, four sent at a time, each with its own presigned URL.
+- **Locked down tight.** All four Block Public Access settings are on, a bucket policy refuses any request not made over HTTPS, and **CORS** (the rules that let a web page on another domain call S3) allows only `PUT` and `GET` from the app's own address.
+- **A lifecycle rule** throws away the parts of any multipart upload left unfinished for a day, so you never pay for invisible half-uploads.
+- **Short-lived downloads.** Your own downloads get a 1-hour presigned GET. Shared short links redirect to a fresh 5-minute URL on every visit.
+
+### Quibble
+
+[Quibble](/projects/quibble) uses S3 to host its plain HTML/JS frontend.
+
+- **A public website bucket.** The `FrontendBucket` has website hosting turned on and a bucket policy that lets anyone read objects. That's why the README warns the deploy fails if Block Public Access is switched on for your whole account.
+- **HTTPS without CloudFront.** S3's website endpoint only speaks plain HTTP, so Quibble shares the bucket's regular HTTPS address instead: `https://<bucket>.s3.<region>.amazonaws.com/index.html`.
+- **Always fresh.** `npm run publish` uploads every file with `Cache-Control: no-cache` and writes a `config.js` that points the browser at the stack's API URLs.
+
+### This website
+
+[This site](/how-this-site-works) lives in a private bucket that only CloudFront can read, using **Origin Access Control**. Deploys run `aws s3 sync`, with year-long cache headers for hashed JS and CSS files and short ones for HTML.
+
+## Try it
+
+List your buckets, then the objects in one of them:
+
+<Command code={`aws s3 ls
+aws s3 ls s3://your-bucket-name/ --recursive`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How S3 is billed">
+
+You pay for storage (GB per month), for requests (PUT and GET are priced per thousand), and for data transferred out to the internet. DropVault's README estimates Standard storage at about $0.025 per GB-month TODO(verify).
+
+- The classic Free Tier included 5 GB of Standard storage plus a number of free requests each month TODO(verify).
+- Unfinished multipart uploads are billed even though you can't see them, which is why DropVault's lifecycle rule matters.
+- Serving through CloudFront can lower transfer costs, since S3-to-CloudFront transfer is not charged TODO(verify).
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="s3-1"
+  question="Why does DropVault hand the browser a presigned URL instead of sending the file through its Lambda?"
+  options={[
+    "Lambda cannot read files at all",
+    "S3 refuses uploads that come from Lambda",
+    "The file goes straight to S3, so big uploads don't hit Lambda's limits or cost Lambda time",
+    "Presigned URLs make the file public forever",
+  ]}
+  answer={2}
+  explanation="The Lambda only signs a URL. The bytes travel browser to S3 directly, which is faster and cheaper, and the URL stops working after it expires."
+/>
+
+<Quiz
+  id="s3-2"
+  question="You open the S3 console and see a folder called user-123. What is it really?"
+  options={[
+    "Part of the object keys: S3 has no real folders",
+    "A separate bucket inside the bucket",
+    "A directory on an EC2 disk",
+  ]}
+  answer={0}
+  explanation="Keys like `user-123/file-456/notes.pdf` contain slashes, and the console draws them as folders to make browsing easier."
+/>
+
+<Quiz
+  id="s3-3"
+  question="Quibble's deploy fails on the bucket policy step. What is the most likely cause, according to its README?"
+  options={[
+    "The bucket name has capital letters",
+    "Block Public Access is switched on for the whole account, so a public-read policy is refused",
+    "S3 is not available in that region",
+    "The frontend files are too big",
+  ]}
+  answer={1}
+  explanation="Quibble's bucket policy makes the site publicly readable. An account-level Block Public Access setting blocks that, so you turn off the public bucket policy part and deploy again."
+/>

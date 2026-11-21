@@ -1,0 +1,111 @@
+SES lets your code send real emails: welcome messages, password resets, "someone shared a file with you". You call one API with a sender, a recipient, a subject and an HTML body, and SES delivers it.
+
+Because spammers would love a free email cannon, SES is strict. You must prove you own the address or domain you send **from** (that's an **identity**), and every new account starts in the **sandbox**, where you can only send **to** addresses you have verified too.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Emails your app sends to its users: shares, invites, receipts, password resets",
+    "Designed HTML emails with your own content for each recipient",
+    "Sending from your own address or domain, with proper sender verification",
+  ]}
+  avoid={[
+    "Alerts to yourself or your team who signed up for them: Amazon SNS email subscriptions are simpler",
+    "Marketing newsletters with lists, templates and unsubscribe handling built in: a dedicated email marketing tool may suit you better",
+    "Text messages or mobile push: use Amazon SNS or AWS End User Messaging TODO(verify)",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Identity">An email address or a whole domain that SES knows you own. An **email identity** is verified by clicking a link AWS sends to it. A **domain identity** is verified by adding DNS records, which also lets you sign mail with DKIM so inboxes trust it.</Concept>
+  <Concept title="Sandbox">Every new account starts here. You can only send to verified addresses, and only a small number of emails per day TODO(verify). Fine for testing, useless for real users.</Concept>
+  <Concept title="Production access">You request it in the SES console by describing how you'll send email and handle bounces. Once approved, you can email anyone, within your sending quota.</Concept>
+  <Concept title="Sending quota and rate">How many emails you may send per 24 hours, and per second. Both start small and grow as you build a good sending record TODO(verify).</Concept>
+  <Concept title="Bounces and complaints">A **bounce** is an address that doesn't exist; a **complaint** is someone clicking 'this is spam'. Too many of either and AWS can pause your sending, so only email people who expect it.</Concept>
+  <Concept title="Regions">SES identities and sandbox status are per region. An address verified in one region is not verified in another.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) uses SES to share files by email.
+
+- **The sender identity.** Terraform registers `sender_email` (from `terraform.tfvars`) as an SES email identity. After the first deploy, AWS emails that address a verification link; until you click it, sharing by email won't work.
+- **One email per recipient.** The `share` Lambda creates a separate short link for each person, then calls `send_email` with a branded HTML body. Everything a user typed (their name, the file name) is HTML-escaped first, so nobody can inject links into mail sent from your verified address.
+- **Clear sandbox errors.** If SES refuses a recipient because it isn't verified, that link is removed and the app explains that email is in test mode and suggests Copy link instead. If no email could be sent, the API answers `422` (a recipient problem) or `502` (SES itself failed).
+- **Locked to one sender.** The IAM policy allows `ses:SendEmail` only when the from-address is the configured `sender_email`.
+- **Health checks.** The admin Health page and the monitor check that the sender is verified, whether the account is still in the sandbox, and the daily quota.
+
+[Quibble](/projects/quibble) doesn't send email to players, so it doesn't use SES. Its alert emails go through SNS.
+
+## Try it
+
+Start verifying an address, then check your sending limits in the current region:
+
+<Command code={`aws ses verify-email-identity --email-address you@example.com
+aws ses get-send-quota`} />
+
+`aws sesv2 get-account` also shows whether the account is still in the sandbox (`ProductionAccessEnabled`).
+
+## Free Tier and cost
+
+<Callout type="cost" title="How SES is billed">
+
+You pay per email sent (priced per 1,000) plus a small charge for data such as attachments TODO(verify). Receiving email and dedicated IP addresses are billed separately TODO(verify).
+
+- SES has had a free monthly allowance of emails for a limited time after you start using it TODO(verify).
+- In the sandbox you can only send a few emails a day anyway, so a student project costs close to nothing.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+<Callout type="warning" title="The sandbox catches everyone">
+
+If share emails work for you but not for a friend, your account is almost certainly still in the SES sandbox. Verify your friend's address for testing, or request production access in the SES console.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="ses-1"
+  question="DropVault is deployed and you share a file with a friend's email, but they get nothing. Your own verified address works fine. Why?"
+  options={[
+    "SES only delivers on weekdays",
+    "Your friend's inbox is full",
+    "The share Lambda has no IAM role",
+    "Your account is in the SES sandbox, which only sends to verified addresses",
+  ]}
+  answer={3}
+  explanation="New accounts start in the sandbox. Verify the friend's address for testing, or request production access to email anyone."
+/>
+
+<Quiz
+  id="ses-2"
+  question="What must happen before DropVault can send any share email at all?"
+  options={[
+    "Someone clicks the verification link AWS emails to sender_email",
+    "You buy a domain name",
+    "You create an SNS topic",
+  ]}
+  answer={0}
+  explanation="SES only sends from verified identities. Terraform registers `sender_email` as an identity, and AWS emails it a link to click."
+/>
+
+<Quiz
+  id="ses-3"
+  question="Why does DropVault HTML-escape the sender's name and the file name before putting them in the email?"
+  options={[
+    "SES rejects emails with capital letters",
+    "So nobody can inject markup or phishing links into mail sent from your verified address",
+    "To make the email smaller",
+    "Escaping is required to use the sandbox",
+  ]}
+  answer={1}
+  explanation="Those values come from users. Without escaping, someone could name a file with HTML that turns your trusted email into a phishing message."
+/>

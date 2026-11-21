@@ -1,0 +1,133 @@
+IAM is the permission system for all of AWS. Every single request, whether from you in the console, a script on your laptop or a Lambda function, is checked by IAM: **who** is asking, **what action** they want, and **on which resource**. If no policy allows it, the answer is no.
+
+IAM is global (not tied to a region) and costs nothing to use. Getting it right is the difference between "a bug in my upload code" and "a bug in my upload code that could delete every table in my account".
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Giving each Lambda function a role with exactly the tables, buckets and APIs it needs",
+    "Creating a day-to-day user for yourself, so you never work as the root user",
+    "Letting a CI system such as GitHub Actions deploy with short-lived credentials (OIDC) instead of stored keys",
+    "Letting one AWS service call another, like API Gateway invoking your Lambda",
+  ]}
+  avoid={[
+    "Sign-up and login for your app's end users: use Amazon Cognito, or your own auth code (both projects write their own)",
+    "Storing API keys or database passwords: use AWS Secrets Manager or SSM Parameter Store",
+    "Managing many people across many AWS accounts: use IAM Identity Center",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Users, roles and the root user">A **user** is a long-term identity for a person or app. A **role** is an identity anyone trusted can step into for a while, getting temporary credentials. The **root user** is the email you signed up with: it can do everything, so lock it away with MFA.</Concept>
+  <Concept title="Policies">JSON documents with statements: an `Effect` (Allow or Deny), a list of `Action`s (like `dynamodb:GetItem`), the `Resource`s they apply to (by ARN, the unique ID of an AWS resource) and an optional `Condition`.</Concept>
+  <Concept title="Default deny, explicit deny wins">Everything starts denied. An Allow opens a door. A Deny anywhere closes it again, even if something else allows it.</Concept>
+  <Concept title="Trust policy vs permission policy">A role has two sides. Its **trust policy** says who may assume it (for example `lambda.amazonaws.com`). Its **permission policies** say what it may do once assumed.</Concept>
+  <Concept title="Resource-based policies">Some resources carry their own policy saying who may use them: an S3 bucket policy, or a Lambda permission that lets `apigateway.amazonaws.com` invoke a function.</Concept>
+  <Concept title="Least privilege">Grant only the actions and resources a piece of code really needs. If it's ever compromised, the damage stays small.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) writes every policy by hand in Terraform, scoped to its own resources.
+
+- **Three roles, not one.** File Lambdas share `enclave-dev-lambda-role`. The `admin` Lambda has its own role, the only one allowed to Scan tables and read CloudWatch. The `monitor` Lambda has a mostly read-only role, plus permission to publish to its SNS topic and write to its own small state table.
+- **Resource-level limits.** S3 actions are allowed only on `<files bucket>/*`; DynamoDB actions only on the files table and its indexes.
+- **Conditions.** The function may send email only from the configured sender address:
+
+```hcl title="terraform/iam.tf"
+    {
+      Effect   = "Allow"
+      Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+      Resource = "*"
+      Condition = {
+        "ForAllValues:StringEquals" = { "ses:FromAddress" = var.sender_email }
+      }
+    }
+```
+
+- **Honest about limits.** Some actions, like `kms:CreateKey` or `cloudwatch:GetMetricData`, can't be limited to one resource, and the code comments say so.
+
+### Quibble
+
+[Quibble](/projects/quibble) lets AWS SAM build **one role per function** from short policy templates:
+
+```yaml title="aws/template.yaml"
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref UsersTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ConnectionsTable }
+```
+
+- `ws-connect` above can only read Users and read/write Connections. Nothing else.
+- Functions that push to browsers get `execute-api:ManageConnections`, scoped to the WebSocket stage's `@connections` path. Functions that start the timer may invoke only `quibble-game-timer`.
+- Because the template creates IAM roles, `sam deploy` must be run with `--capabilities CAPABILITY_IAM`, an explicit "yes, I know this creates permissions".
+
+### This website
+
+[This site](/how-this-site-works) is deployed by GitHub Actions using **OIDC**: GitHub signs a token saying which repo and branch is running, and IAM swaps it for credentials that expire within the hour. The deploy role may only sync the site's bucket and invalidate its CloudFront distribution. No AWS keys are stored in GitHub.
+
+## Try it
+
+Ask AWS who you are right now. It's the first thing to run when a command says "access denied":
+
+<Command code={`aws sts get-caller-identity`} output={`{
+    "UserId": "AIDA...",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/your-user"
+}`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="IAM is free">
+
+IAM users, roles and policies cost nothing. You only pay for the AWS resources those identities create and use.
+
+The real cost risk is a leaked access key: someone else can run up a bill as you. Never commit keys to GitHub, and set up a [billing alarm](/setup/billing-alarm).
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="iam-1"
+  question="A Lambda role has a policy that allows s3:GetObject on a bucket, but the bucket policy explicitly denies it. What happens?"
+  options={[
+    "The Allow wins because it is on the role",
+    "AWS picks whichever policy is newer",
+    "The request is allowed only on weekdays",
+    "The request is denied: an explicit Deny always wins",
+  ]}
+  answer={3}
+  explanation="IAM starts from deny, an Allow opens access, and any explicit Deny overrides every Allow."
+/>
+
+<Quiz
+  id="iam-2"
+  question="Which part of a role says that the Lambda service is allowed to use it?"
+  options={[
+    "The trust policy",
+    "The permission policy",
+    "The bucket policy",
+  ]}
+  answer={0}
+  explanation="The trust policy names who may assume the role, such as `lambda.amazonaws.com`. Permission policies say what the role can do afterwards."
+/>
+
+<Quiz
+  id="iam-3"
+  question="Why does this site's GitHub deploy use an OIDC role instead of an access key stored in GitHub secrets?"
+  options={[
+    "Access keys don't work with S3",
+    "OIDC credentials are short-lived and nothing long-lived is stored that could leak",
+    "OIDC is required for CloudFront",
+    "It makes the build faster",
+  ]}
+  answer={1}
+  explanation="Stored access keys never expire on their own and can leak. With OIDC, GitHub proves which repo is running and gets credentials that expire within the hour."
+/>

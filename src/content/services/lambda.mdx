@@ -1,0 +1,113 @@
+Lambda is AWS's "serverless" compute service. You upload a function (a Python file, a Node.js file...), tell AWS what should trigger it, and AWS runs it for you. "Serverless" doesn't mean there are no servers. It means you never pick, patch or pay for an idle one: AWS starts your code when an event arrives and stops billing when it finishes.
+
+An **event** is just a small JSON object describing what happened: an HTTP request, a new file, a timer going off. Your function receives it, does its job and returns a result.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "The code behind an API: one request in, one answer out (with API Gateway in front)",
+    "Reacting to things that happen in AWS: a file lands in S3, a DynamoDB item expires, an alarm fires",
+    "Small scheduled jobs, like a health check every 5 minutes (with EventBridge)",
+    "Traffic that is spiky or near zero most of the time, so paying per request beats paying per hour",
+  ]}
+  avoid={[
+    "Jobs that run longer than 15 minutes: use ECS on Fargate or AWS Batch",
+    "Busy, steady traffic all day where an always-on server is cheaper: use EC2 or ECS",
+    "Holding open connections yourself (game servers, chat): let API Gateway WebSocket APIs hold the sockets and call Lambda per message",
+    "Heavy GPU work such as training models: use EC2 GPU instances or SageMaker",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Function and handler">Your code plus its settings. The **handler** is the one function Lambda calls, like `upload_file.lambda_handler` in Python or `http.handler` in Node.js. It receives the `event` and returns a response.</Concept>
+  <Concept title="Triggers and invocation types">**Synchronous**: the caller waits for the answer (API Gateway). **Asynchronous**: the caller hands over the event and walks away, and Lambda queues and retries it. **Event source mapping**: Lambda itself polls a stream or queue, like a DynamoDB stream, and passes you batches.</Concept>
+  <Concept title="Memory, CPU and timeout">You choose the memory, and Lambda gives CPU in proportion. More memory can make CPU-heavy code (like password hashing) finish faster. The timeout caps each run, up to 15 minutes.</Concept>
+  <Concept title="Cold starts">The first request to a new copy of your function has to load your code first, which adds a short delay. Later requests reuse the warm copy. Keep start-up code small and create SDK clients once, outside the handler.</Concept>
+  <Concept title="Concurrency">How many copies run at the same moment. Every function in an account and region shares one pool. If the pool is full, new requests are **throttled** (refused or queued), not lost forever.</Concept>
+  <Concept title="Execution role and layers">The **execution role** is the IAM role your code runs as: it decides which tables, buckets and APIs the function may touch. A **layer** is a zip of shared code or libraries that several functions can reuse.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) runs about a dozen small Python 3.13 functions, all named with the `enclave-dev-` prefix by default.
+
+- **One function per job.** `create-upload`, `complete`, `list`, `download`, `share`, `delete`, plus `auth` (sign-up and login), `qr` (short links) and `admin`. API Gateway calls each of these synchronously. A separate `monitor` function is triggered by a schedule and by log subscriptions instead.
+- **A Lambda authorizer.** Before any file route runs, the `authorizer` function checks the caller's token and returns an allow policy. API Gateway caches that answer for 5 minutes, so most requests skip it.
+- **Event source mapping.** The `cleanup` function reads the files table's DynamoDB stream. A filter means it only runs when DynamoDB's TTL deletes an upload that never finished, and then it aborts the half-done S3 upload.
+- **Layers.** Shared code (`endpoints/common/python`: auth, storage, links...) ships as one layer, and the `jsonschema` library as another, so each function's own zip stays tiny.
+- **Bigger memory where it pays.** `auth` gets 1024 MB because PBKDF2 password hashing is CPU-bound, so more memory means faster logins.
+
+### Quibble
+
+[Quibble](/projects/quibble) runs six Node.js 22 functions on **arm64** (AWS Graviton processors): `api`, `ws-connect`, `ws-message`, `ws-disconnect`, `game-timer` and `monitor`.
+
+- **No `setTimeout` between requests.** A Lambda can't sit in memory waiting for a question's countdown. So whoever moves a game to a new phase invokes `quibble-game-timer` **asynchronously** (`InvocationType: 'Event'`). The timer sleeps until the deadline, advances the game and schedules the next step.
+- **Recursion on purpose.** Because each timer run invokes the next one, the template sets `RecursiveLoop: Allow`. Without it, Lambda's loop detection would stop the chain mid-game after a number of hops TODO(verify).
+- **Retries are safe.** The timer's async config allows 2 retries and keeps throttled events queued for up to 10 minutes, and every step is idempotent (running it twice does no harm).
+- **One full vCPU for sign-ups.** The `api` function gets 1769 MB so bcrypt hashing stays fast when a whole classroom signs up at once.
+- **The concurrency quota matters.** The README warns that new accounts may start with only 10 concurrent executions instead of the standard 1,000 TODO(verify), and shows how to request a raise before a big game.
+
+## Try it
+
+List the functions in your current region:
+
+<Command code={`aws lambda list-functions --query "Functions[].FunctionName"`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Lambda is billed">
+
+You pay for the number of requests and for compute time, measured in GB-seconds (memory size multiplied by how long the function ran). Arm64 functions are priced a little lower than x86 TODO(verify).
+
+- Lambda has long had a monthly free allowance of 1 million requests and 400,000 GB-seconds TODO(verify).
+- Both projects say a class-sized demo stays within or near the free allowance. Quibble's always-on monitor runs about 43,000 times a month TODO(verify).
+- Logs from your functions go to CloudWatch, which bills separately.
+
+AWS changed the Free Tier for new accounts in 2025: newer accounts get a credits-based free plan instead of the old 12-month offers TODO(verify). See [Create your AWS account](/setup/create-aws-account) for what applies to you.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="lambda-1"
+  question="Quibble needs to do something exactly when a question's countdown ends. Why can't the WebSocket Lambda just call setTimeout?"
+  options={[
+    "setTimeout is not available in Node.js 22",
+    "A Lambda run ends once it returns, so nothing keeps waiting in memory between requests",
+    "API Gateway blocks timers",
+    "Timers are only allowed in Python Lambdas",
+  ]}
+  answer={1}
+  explanation="Lambda functions are short-lived and stateless. Quibble invokes its `game-timer` function asynchronously with a deadline instead, and that function advances the game when the time is up."
+/>
+
+<Quiz
+  id="lambda-2"
+  question="DropVault's cleanup function runs when DynamoDB's TTL deletes an unfinished upload. Which kind of trigger is that?"
+  options={[
+    "A synchronous call from API Gateway",
+    "A schedule that runs every minute",
+    "An event source mapping that reads the table's stream",
+  ]}
+  answer={2}
+  explanation="Lambda polls the DynamoDB stream for you and passes batches of changes to the function. A filter means `cleanup` only sees TTL deletions of items still marked `UPLOADING`."
+/>
+
+<Quiz
+  id="lambda-3"
+  question="DropVault gives its auth function 1024 MB of memory even though it uses little RAM. Why?"
+  options={[
+    "Lambda gives CPU in proportion to memory, and password hashing is CPU-heavy",
+    "Functions under 1024 MB cannot read DynamoDB",
+    "More memory makes the function free",
+    "It stops cold starts from ever happening",
+  ]}
+  answer={0}
+  explanation="Memory is also the CPU dial. PBKDF2 hashing finishes faster with more CPU, so logins are quicker."
+/>

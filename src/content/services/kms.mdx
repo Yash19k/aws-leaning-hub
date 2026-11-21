@@ -1,0 +1,107 @@
+KMS manages **encryption keys**: the secret values that scramble data so only someone with the key can read it. The clever part is that you never see or download the key itself. Your code (or a service like S3) asks KMS to encrypt or decrypt, KMS checks IAM permissions, does the work, and records the request in **CloudTrail** (AWS's audit log of API calls).
+
+Services like S3 and DynamoDB already encrypt your data at rest by default, with keys AWS manages for you. You reach for KMS when you want more control: your own key, your own access rules, your own audit trail, or the power to make data unreadable by deleting the key.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Encrypting S3 objects or DynamoDB tables with a key you control and can audit",
+    "Separating data so one customer's key can't decrypt another customer's files",
+    "Meeting rules that say who may decrypt data and require a log of every use",
+    "Encrypting small secrets in your own code with the Encrypt and Decrypt APIs",
+  ]}
+  avoid={[
+    "Storing passwords or API keys for your app: use AWS Secrets Manager (which uses KMS underneath)",
+    "Hobby projects where default encryption is enough: S3's SSE-S3 is free and on by default TODO(verify)",
+    "Encrypting large files directly with the Encrypt API: it only takes small payloads, so use envelope encryption or let S3 handle it TODO(verify)",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="KMS key">The key that stays inside KMS. **AWS owned** and **AWS managed** keys are handled for you. A **customer managed** key is one you create: you set its policy, rotation and deletion, and you pay a monthly fee for it.</Concept>
+  <Concept title="Envelope encryption">KMS hands out a fresh **data key** for each object. The data key encrypts the file, then KMS encrypts the data key, which is stored next to the file. Big files never travel to KMS; only the small data key does.</Concept>
+  <Concept title="Key policy and IAM">Each key has a **key policy**, a resource policy saying who may use or manage it. IAM policies on roles must also allow actions like `kms:Decrypt`.</Concept>
+  <Concept title="Aliases">A friendly name such as `alias/enclave-dev-files` that points to a key's long ID. Code can refer to the alias, and you can repoint it later.</Concept>
+  <Concept title="Rotation">KMS can automatically make new key material on a schedule while still decrypting old data. Turn it on and you don't have to re-encrypt anything yourself.</Concept>
+  <Concept title="Scheduled deletion">Deleting a key is permanent and makes everything encrypted with it unreadable, so KMS makes you wait first: a waiting period of 7 to 30 days TODO(verify), during which you can cancel.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) lets you pick an encryption mode with the `kms_mode` Terraform variable:
+
+- **`s3` (the default).** SSE-S3: S3 encrypts every object with AES-256 using keys S3 manages. No KMS involved, and free.
+- **`shared`.** Terraform creates one customer managed key (alias `alias/enclave-dev-files`) with automatic rotation on and a 7-day deletion window, and sets it as the bucket's default encryption. An **S3 Bucket Key** is enabled too, which cuts the number of calls S3 makes to KMS.
+- **`per_user`.** The upload Lambda creates a separate key for each user on their first upload, with an alias like `alias/enclave-dev/user/<user_id>`. One user's files can't be decrypted with another user's key.
+- **Exactly one key per user.** Two uploads at the same moment could both create a key. So the Lambda first does a DynamoDB conditional write on a `USERKEY#<user_id>` item as a lock; only the winner calls `kms:CreateKey`, and the others wait for it to publish the key's ARN.
+- **Headers on presigned uploads.** In `per_user` mode the browser must send `x-amz-server-side-encryption: aws:kms` and the key ID along with its PUT, because they're part of the signed request.
+- **Clean teardown.** Terraform doesn't know about keys made at runtime, so a destroy-time script schedules every key tagged with the app's prefix for deletion with a 7-day window.
+
+### Quibble and this website
+
+[Quibble](/projects/quibble) and [this site](/how-this-site-works) don't create any KMS keys. They rely on the default encryption that S3 and DynamoDB already apply.
+
+## Try it
+
+See the keys and aliases in your current region (AWS managed aliases start with `alias/aws/`):
+
+<Command code={`aws kms list-aliases --query "Aliases[].AliasName"`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How KMS is billed">
+
+Each customer managed key has a monthly fee, and API requests (encrypt, decrypt, generate data key) are billed per 10,000 TODO(verify). DropVault's README puts the key at about $1 per month, so `per_user` mode costs about $1 per user per month TODO(verify).
+
+- AWS managed keys (like `aws/s3`) have no monthly fee, but their requests may still be billed TODO(verify).
+- KMS has had a free monthly allowance of requests TODO(verify).
+- DropVault's cleanup script says scheduling a key for deletion stops its monthly charge right away TODO(verify). Either way, schedule deletion when you're done experimenting.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="kms-1"
+  question="In DropVault's per_user mode, what stops two parallel uploads from creating two keys for the same user?"
+  options={[
+    "KMS refuses to create two keys on the same day",
+    "A DynamoDB conditional write on a USERKEY item acts as a lock",
+    "The browser waits for the first upload to finish",
+    "S3 merges the two keys",
+  ]}
+  answer={1}
+  explanation="Only the request whose `put_item` succeeds with `attribute_not_exists(file_id)` creates the key. The others wait and read the key ARN it stores."
+/>
+
+<Quiz
+  id="kms-2"
+  question="With envelope encryption, what actually gets sent to KMS when S3 encrypts a 2 GB file?"
+  options={[
+    "The whole 2 GB file",
+    "Nothing at all",
+    "A small data key, not the file",
+  ]}
+  answer={2}
+  explanation="KMS generates and protects a small data key. The data key encrypts the big file locally, so the file itself never goes to KMS."
+/>
+
+<Quiz
+  id="kms-3"
+  question="Why does KMS make you wait before a key is really deleted?"
+  options={[
+    "Deleting a key makes everything encrypted with it unreadable forever, so you get time to change your mind",
+    "KMS has to copy the key to every region first",
+    "It's a billing trick to charge one more month",
+    "Keys can only be deleted on weekends",
+  ]}
+  answer={0}
+  explanation="Once a key is gone, nothing can decrypt its data. The waiting period lets you cancel a mistake. DropVault uses the shortest window, 7 days."
+/>

@@ -1,0 +1,110 @@
+SNS is a **publish/subscribe** (pub/sub) service. You create a **topic**, things **subscribe** to it (an email address, a phone, a Lambda function, a queue), and when anyone **publishes** a message to the topic, SNS delivers a copy to every subscriber. The publisher doesn't need to know who is listening or how many.
+
+That decoupling is the point. Your alarm or your code just says "something happened"; who hears about it is a separate decision you can change without touching code.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Alert emails to yourself or your team: alarms, failed deploys, health checks",
+    "Fan-out: one event that several systems must react to (a Lambda, a queue and an email)",
+    "Simple text notifications by SMS or mobile push TODO(verify)",
+    "A target for CloudWatch alarms, which can notify an SNS topic directly",
+  ]}
+  avoid={[
+    "Designed, personalised emails to your app's users (like 'X shared a file with you'): use Amazon SES",
+    "Work that must wait in line and be processed one by one, with retries: use Amazon SQS",
+    "Routing events by their content between many AWS services and apps: use Amazon EventBridge",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Topic">A named channel with an ARN, like a group chat. Publishers send to it; it keeps no history of old messages.</Concept>
+  <Concept title="Subscription and protocol">A subscription connects a topic to one endpoint using a **protocol**: `email`, `sms`, `lambda`, `sqs`, `https` and more. One topic can have many subscriptions of different kinds.</Concept>
+  <Concept title="Confirmation">An email subscription stays **pending** until the person clicks the 'Confirm subscription' link AWS emails them. Until then, nothing is delivered. This stops anyone signing up a stranger's inbox.</Concept>
+  <Concept title="Publish">One API call (`Publish`) with a message and an optional subject. SNS handles delivery and retries to every subscriber.</Concept>
+  <Concept title="Fan-out">Publish once, deliver many times. Adding a new subscriber needs no code change in the publisher.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) sends every alert through one topic, `enclave-dev-alerts`.
+
+- **An email subscription** is created only if you set `alert_email` in `terraform.tfvars`. AWS emails that address a confirmation link first.
+- **CloudWatch alarms publish straight to the topic.** The Lambda error and API 5xx alarms notify on both the `ALARM` and the `OK` (fixed) states.
+- **The `monitor` Lambda publishes too**, for errors it finds in the logs and failed health checks. It allows at most one email per function every `alert_cooldown_minutes` (15 by default), so a broken deploy can't flood your inbox.
+- **Failed deploys.** If `deploy.sh` stops with an error, it runs `aws sns publish` to the topic before exiting.
+
+### Quibble
+
+[Quibble](/projects/quibble) has an `AlertsTopic` with the display name "Quibble alerts", and an email subscription created only when the `AlertEmail` parameter is set.
+
+- **The monitor turns alarms into readable emails.** Alarms invoke the `monitor` Lambda, which adds the matching error log lines and publishes to the topic.
+- **A safety net.** If the monitor itself fails, the `quibble-monitor-errors` alarm publishes CloudWatch's plain message straight to the topic.
+- **Admin tripwire.** The `api` function publishes when an admin role is granted or removed, a player is banned or deleted, a password is reset, or questions are bulk-deleted (`lib/alerts.js`), in case an admin account falls into the wrong hands.
+- **Did they confirm?** `npm run alerts:test` sends a test email and uses `ListSubscriptionsByTopic` to say whether the address has confirmed yet.
+
+## Try it
+
+Send a message to a topic and see who's subscribed. Replace the ARN with your own topic's:
+
+<Command code={`aws sns publish --topic-arn arn:aws:sns:ap-south-1:123456789012:my-topic --subject "Test" --message "Hello from the CLI"
+aws sns list-subscriptions-by-topic --topic-arn arn:aws:sns:ap-south-1:123456789012:my-topic`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How SNS is billed">
+
+You pay per million publishes and per delivery, with the price depending on the protocol: email, SMS and HTTP deliveries are priced differently TODO(verify). SMS is the expensive one and varies by country TODO(verify).
+
+- Quibble's README says SNS email is free up to 1,000 emails a month TODO(verify).
+- SNS has also had a monthly allowance of free publishes TODO(verify).
+- Both projects send only a handful of alert emails, so they stay at or near zero.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="sns-1"
+  question="You deployed Quibble with AlertEmail set, but no alert emails arrive. What's the first thing to check?"
+  options={[
+    "Whether you clicked Confirm subscription in the email AWS sent",
+    "Whether SNS is enabled in your region",
+    "Whether the topic has enough storage",
+    "Whether SES is in the sandbox",
+  ]}
+  answer={0}
+  explanation="Email subscriptions stay pending until confirmed. `npm run alerts:test` even tells you whether the address has confirmed."
+/>
+
+<Quiz
+  id="sns-2"
+  question="Why does DropVault use SES, not SNS, for its 'X shared a file with you' emails?"
+  options={[
+    "SNS can't send email at all",
+    "SNS is more expensive",
+    "SNS only delivers to confirmed subscribers of a topic, while SES sends a custom HTML email to any address you choose",
+  ]}
+  answer={2}
+  explanation="SNS is for notifying people who subscribed. Share emails go to new recipients each time and need a designed message, which is what SES is for."
+/>
+
+<Quiz
+  id="sns-3"
+  question="Quibble's monitor function publishes one message to AlertsTopic. Later you subscribe a teammate's email too. What changes in the code?"
+  options={[
+    "The monitor must list both addresses",
+    "Nothing: SNS delivers each published message to every confirmed subscriber",
+    "You need a second topic",
+    "The monitor must be redeployed with a new role",
+  ]}
+  answer={1}
+  explanation="That's fan-out. The publisher doesn't know or care how many subscribers there are, which is why the README suggests adding recipients in the SNS console."
+/>

@@ -1,0 +1,118 @@
+CloudFront is a **CDN** (content delivery network): hundreds of AWS data centres around the world, called **edge locations**, that keep copies of your files close to your visitors. A student in Chennai gets your page from a nearby edge instead of from a bucket in another country, so it loads faster, and your **origin** (the real source, often an S3 bucket) does far less work.
+
+CloudFront also gives you HTTPS, lets you keep the bucket completely private, and can run tiny functions at the edge to rewrite requests.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Serving a static site or single-page app from a private S3 bucket over HTTPS",
+    "Visitors spread across a country or the world who should all get fast loads",
+    "Caching files that rarely change (images, hashed JS and CSS) for a long time",
+    "Small request tweaks at the edge, like rewriting URLs, with CloudFront Functions",
+  ]}
+  avoid={[
+    "A brand-new account that can't create distributions yet: start with Amplify Hosting, as DropVault does",
+    "The simplest possible hosting with Git-based deploys and little to configure: Amplify Hosting may be easier",
+    "Responses that are different for every request and can't be cached: call API Gateway directly",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Distribution and origin">A **distribution** is your CloudFront setup, with an address like `d1234abcd.cloudfront.net` and a free HTTPS certificate for it. The **origin** is where CloudFront fetches files it doesn't have yet.</Concept>
+  <Concept title="Caching and TTLs">On a **cache miss** the edge fetches from the origin and keeps a copy; later visitors get a **cache hit**. How long it keeps the copy depends on the **cache policy** and the file's `Cache-Control` header.</Concept>
+  <Concept title="Origin Access Control (OAC)">Lets CloudFront sign its requests to S3, so the bucket can stay fully private with a policy that allows only your distribution. It replaces the older Origin Access Identity (OAI).</Concept>
+  <Concept title="Invalidations">A request to throw away cached copies before they expire, e.g. `/index.html` or `/*`, so visitors get your new deploy right away.</Concept>
+  <Concept title="CloudFront Functions">Small JavaScript functions that run at the edge on each request or response, in well under a millisecond. Good for URL rewrites, redirects and headers. **Lambda@Edge** is the heavier option for more complex logic.</Concept>
+  <Concept title="Price classes">Choose which parts of the world's edge network to use. Fewer regions costs less; DropVault picks `PriceClass_200`, which includes India.</Concept>
+</KeyConcepts>
+
+<Callout type="warning" title="New accounts may need verification">
+
+DropVault's README warns that new AWS accounts must be verified by AWS Support before they can create CloudFront distributions. If you hit an error creating one, use Amplify Hosting meanwhile, or contact AWS Support TODO(verify).
+
+</Callout>
+
+## How our projects use it
+
+### This website
+
+[This site](/how-this-site-works) is a private S3 bucket behind CloudFront.
+
+- **OAC only.** The bucket blocks all public access, and its policy allows exactly one reader: this distribution.
+- **A CloudFront Function rewrites URLs.** It turns `/projects/dropvault` into `/projects/dropvault/index.html`, the page pre-rendered at build time, so deep links work without a server.
+- **Smart cache headers.** Hashed JS and CSS files are cached for a year because their names change on every build. HTML is always revalidated.
+- **Invalidations after deploy.** GitHub Actions clears cached HTML paths so the next visitor gets the new version.
+
+### DropVault (optional)
+
+[DropVault](/projects/dropvault) can use CloudFront instead of Amplify if you set `web_hosting = "cloudfront"`.
+
+- **A private bucket plus OAC.** `enclave-dev-web-<account id>` blocks public access. Its policy lets `cloudfront.amazonaws.com` read objects only when `AWS:SourceArn` is this distribution.
+- **Sensible defaults.** HTTP is redirected to HTTPS, compression is on, HTTP/2 and HTTP/3 are enabled, and the managed `CachingOptimized` cache policy is used.
+- **SPA routing with error responses.** A `403` or `404` from S3 is turned into `/index.html` with status `200`, so routes like `/login` work.
+- **Deploys.** `deploy.sh` syncs assets with a year-long `Cache-Control`, syncs everything else with `no-cache`, then invalidates `/*`.
+
+[Quibble](/projects/quibble) doesn't use CloudFront. Its README lists that as a known trade-off: putting CloudFront in front of the bucket would give it a custom domain and clean `/` URLs.
+
+## Try it
+
+Clear cached copies of everything after a deploy (quote the path so your shell doesn't expand the `*`):
+
+<Command code={`aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID --paths "/*"`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How CloudFront is billed">
+
+You pay for data transferred out to visitors (per GB, varying by region), for requests (per 10,000), and for CloudFront Function invocations TODO(verify). Fetching from an AWS origin such as S3 isn't charged as data transfer TODO(verify).
+
+- CloudFront has had an always-free monthly allowance of data transfer and requests that a club-sized site fits inside TODO(verify).
+- A number of invalidation paths each month are free, and `/*` counts as one path TODO(verify).
+- A cheaper price class trims cost by skipping the most expensive edge regions.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="cloudfront-1"
+  question="What does Origin Access Control let you do?"
+  options={[
+    "Keep the S3 bucket fully private while CloudFront can still read it",
+    "Make the bucket public for everyone",
+    "Run Lambda functions at the edge",
+    "Skip HTTPS",
+  ]}
+  answer={0}
+  explanation="CloudFront signs each request to S3, and the bucket policy allows only that distribution. Nobody can read the bucket directly."
+/>
+
+<Quiz
+  id="cloudfront-2"
+  question="You deploy a new version of a site, but visitors still see the old page. What's the usual fix?"
+  options={[
+    "Delete the S3 bucket",
+    "Restart CloudFront",
+    "Create an invalidation for the HTML paths",
+    "Change the price class",
+  ]}
+  answer={2}
+  explanation="Edges keep cached copies until they expire. An invalidation tells every edge to drop them. Hashed asset files don't need it because their names change."
+/>
+
+<Quiz
+  id="cloudfront-3"
+  question="This site's CloudFront Function turns /projects/dropvault into /projects/dropvault/index.html. Why?"
+  options={[
+    "To make URLs shorter",
+    "S3 has no file called /projects/dropvault, but the build pre-rendered an index.html for that route",
+    "CloudFront only serves files named index.html",
+  ]}
+  answer={1}
+  explanation="A private bucket only has real files. The function maps the clean URL to the pre-rendered page, so deep links work without any server."
+/>

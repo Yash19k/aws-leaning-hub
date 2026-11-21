@@ -1,0 +1,124 @@
+Clicking around the console to build an app works once. Doing it again, the same way, for a friend's account or after a mistake, is painful. **Infrastructure as code** fixes that: you describe every bucket, table, function and permission in a text file, and a tool creates them for you.
+
+**CloudFormation** is AWS's own infrastructure-as-code service. You give it a **template** (YAML or JSON), and it creates everything as one **stack**. **AWS SAM** (Serverless Application Model) is a shorter way to write templates for serverless apps: a SAM template is expanded into a full CloudFormation template when you deploy.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Any project you want to deploy more than once, or that someone else should be able to deploy",
+    "Serverless apps (Lambda, API Gateway, DynamoDB): SAM makes the template short",
+    "Deleting everything a project created with one command when you're done",
+    "Reviewing infrastructure changes in Git, just like code",
+  ]}
+  avoid={[
+    "Managing resources across AWS and other clouds or services from one tool: Terraform is a popular choice",
+    "Writing infrastructure in TypeScript or Python instead of YAML: use the AWS CDK, which generates CloudFormation",
+    "A quick throwaway experiment you'll delete in ten minutes: the console is fine",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Template">The recipe: a `Resources` section (what to create), `Parameters` (values you pass in at deploy time) and `Outputs` (values to print afterwards, like your API's URL). `!Ref`, `!Sub` and `!GetAtt` link resources to each other.</Concept>
+  <Concept title="Stack">Everything created from one template, managed as a unit. Update the template and redeploy, and CloudFormation works out what to add, change or remove. Delete the stack and everything in it goes.</Concept>
+  <Concept title="Change sets">A preview of what a deploy will do before it does it: 'add 2 resources, modify 1, replace 0'. `sam deploy` creates a change set and then runs it.</Concept>
+  <Concept title="Rollbacks">If any resource fails during a deploy, CloudFormation undoes the whole deploy and returns to the last working state. You never end up with half an app.</Concept>
+  <Concept title="ROLLBACK_COMPLETE">The state a stack is left in when its very **first** create fails and is rolled back. It can't be updated, only deleted. Read the events to see why it failed, delete the stack, fix the problem and deploy again.</Concept>
+  <Concept title="SAM shorthand">`Transform: AWS::Serverless-2016-10-31` turns on SAM. One `AWS::Serverless::Function` becomes a Lambda function, its IAM role, its permissions and its triggers. `sam build` packages the code; `sam deploy` uploads it and deploys the stack.</Concept>
+</KeyConcepts>
+
+## Stack states you'll meet
+
+| Status | What it means | What to do |
+| --- | --- | --- |
+| `CREATE_COMPLETE` / `UPDATE_COMPLETE` | All good | Nothing |
+| `ROLLBACK_COMPLETE` | The first create failed and was undone | Read the events, delete the stack, fix, redeploy |
+| `UPDATE_ROLLBACK_COMPLETE` | An update failed and was undone; the old version is still running | Fix and deploy again |
+| `UPDATE_ROLLBACK_FAILED` | The undo itself got stuck | Fix the cause, then continue the rollback TODO(verify) |
+| `DELETE_FAILED` | Something couldn't be deleted, often a bucket that isn't empty | Empty the bucket, delete again |
+
+## How our projects use it
+
+### Quibble: AWS SAM
+
+[Quibble](/projects/quibble) is one SAM template, `aws/template.yaml`, with more than 50 resources (before SAM expands it).
+
+- **Globals** set the runtime (`nodejs22.x`), `arm64`, memory and timeout once, plus environment variables every function shares, such as each table's name via `!Ref`.
+- **Short function definitions.** Each `AWS::Serverless::Function` lists its handler, an `Events` section (an HTTP API route, a schedule, an EventBridge rule) and `Policies`. SAM generates the rest.
+- **Parameters** like `MaxPlayers`, `LateGraceMs` and `AlertEmail` are passed as `npm run deploy -- LateGraceMs=5000`. The secret `JwtSecret` parameter uses `NoEcho` so CloudFormation never shows it.
+- **One-command deploy.** `npm run deploy` runs `sam build`, then `sam deploy --stack-name quibble --resolve-s3 --capabilities CAPABILITY_IAM`. `--resolve-s3` lets SAM create a bucket to upload the code to.
+- **It watches its own deploys.** An EventBridge rule matches `CloudFormation Stack Status Change` events for this stack, such as `UPDATE_ROLLBACK_COMPLETE` or `ROLLBACK_FAILED`, and the monitor Lambda emails you which resource failed and why.
+- **Teardown.** Empty the website bucket first (CloudFormation won't delete a bucket that still has files), then `sam delete --stack-name quibble`.
+
+### This website: SAM too
+
+[This site](/how-this-site-works) is one SAM template, `infra/template.yaml`, holding the bucket, the CloudFront distribution, its CloudFront Function and the GitHub deploy role.
+
+### DropVault: Terraform, not CloudFormation
+
+[DropVault](/projects/dropvault) uses **Terraform**, a tool made by HashiCorp. It is not an AWS service, but it does the same job.
+
+- **Providers.** Terraform talks to AWS through the `hashicorp/aws` provider. DropVault also uses `random` (to generate the token secret), `archive` (to zip Lambda code) and `null` (to run build scripts).
+- **A state file.** CloudFormation remembers what it built inside AWS. Terraform keeps that memory in a local file, `terraform.tfstate`. Lose it and Terraform forgets what it created. DropVault keeps it locally by default; teams usually store it in S3.
+- **Plan, apply, destroy.** `terraform plan` previews changes (like a change set), `terraform apply` makes them and `terraform destroy` removes everything. DropVault's `deploy.sh` wraps `terraform apply` plus building and publishing the web app.
+
+## Try it
+
+Check a stack's status, and list the recent events when something fails:
+
+<Command code={`aws cloudformation describe-stacks --stack-name quibble --query "Stacks[0].StackStatus"
+aws cloudformation describe-stack-events --stack-name quibble --max-items 10`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How CloudFormation is billed">
+
+CloudFormation and SAM don't charge for managing standard AWS resources TODO(verify). You pay for the resources the stack creates, exactly as if you had made them by hand. Third-party resource types and hooks can have their own charges TODO(verify).
+
+The biggest saving is cleanup: deleting the stack removes everything it made, so nothing forgotten keeps billing you. Terraform itself is free to run on your laptop.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="cloudformation-1"
+  question="Your first deploy of a new stack fails and the status shows ROLLBACK_COMPLETE. What now?"
+  options={[
+    "Run sam deploy again and it will update the stack",
+    "Nothing, the app is running fine",
+    "Read the stack events to find the cause, delete the stack, fix it and deploy again",
+    "Contact AWS Support to unlock it",
+  ]}
+  answer={2}
+  explanation="A stack whose first create rolled back can't be updated, only deleted. The events tab names the resource that failed and why."
+/>
+
+<Quiz
+  id="cloudformation-2"
+  question="What does SAM do with an AWS::Serverless::Function resource?"
+  options={[
+    "Expands it into CloudFormation resources: the Lambda function, its IAM role, permissions and triggers",
+    "Runs it on a server SAM manages",
+    "Uploads it to GitHub",
+  ]}
+  answer={0}
+  explanation="SAM is a transform. At deploy time it rewrites the short resource into the full set of CloudFormation resources it needs."
+/>
+
+<Quiz
+  id="cloudformation-3"
+  question="DropVault uses Terraform. Where does Terraform keep its record of what it created?"
+  options={[
+    "Inside a CloudFormation stack",
+    "In a state file, terraform.tfstate, which is local by default",
+    "In a DynamoDB table AWS creates for you",
+    "Nowhere: it reads AWS from scratch and guesses",
+  ]}
+  answer={1}
+  explanation="Terraform is not an AWS service, so AWS doesn't track its resources for it. The state file maps each resource in your code to the real one in AWS."
+/>

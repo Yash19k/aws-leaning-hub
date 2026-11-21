@@ -1,0 +1,111 @@
+DynamoDB is a **NoSQL** database: there are no SQL joins and no fixed columns. You store **items** (think JSON objects) in **tables**, and every item has a **key**. Ask for an item by its key and DynamoDB returns it in milliseconds, whether the table holds a hundred items or a billion.
+
+The trade-off is that you design the table around the questions your app will ask ("all files of this user", "all answers to question 3"), not around a tidy diagram of entities. Get that right and you never need a server or a connection pool.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Serverless apps where Lambda needs fast reads and writes with no database server to run",
+    "Lookups by a known key: a user by email, a game by its code, a link by its short code",
+    "Spiky traffic: on-demand tables scale up for a burst and cost nothing when idle",
+    "Data that should delete itself later (sessions, expired links, old games) using TTL",
+  ]}
+  avoid={[
+    "Ad-hoc reports, joins and complex filters across many fields: use a relational database such as Amazon RDS or Aurora",
+    "Full-text search: use Amazon OpenSearch Service",
+    "Big files such as images or videos: store them in S3 and keep only the key in DynamoDB",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Table, item and attributes">A table holds items. Each item is a set of attributes (name and value pairs). Items in the same table can have different attributes, which lets one table hold several kinds of record.</Concept>
+  <Concept title="Partition key and sort key">The **partition key** decides where an item is stored and is what you look it up by. An optional **sort key** lets many items share a partition key and come back in order, like all answers for one question.</Concept>
+  <Concept title="Query vs Scan">A **Query** reads only the items under one partition key: fast and cheap. A **Scan** reads the whole table: fine for an admin page, slow and costly for everyday requests.</Concept>
+  <Concept title="Global secondary index (GSI)">A second copy of the table, keyed differently, so you can query by another attribute. An index is **sparse** when only some items have its key attribute: the others simply don't appear in it.</Concept>
+  <Concept title="TTL and streams">**TTL** (time to live) deletes an item after the Unix timestamp in an attribute you choose. Deletion is not instant: it can take a while after the time passes TODO(verify). A **stream** is a log of every change to the table that a Lambda can react to.</Concept>
+  <Concept title="Conditional writes and transactions">A **condition** makes a write happen only if something is true, like 'only if this item doesn't exist yet'. A **transaction** groups several writes so they all succeed or all fail. Both stop two requests from stepping on each other.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) has a users table (`enclave-users-dev`, keyed by `email`) and one main files table (`enclave-files-dev`, keyed by `file_id`). Both use **on-demand** billing.
+
+- **Several kinds of item in one table.** A key like a UUID is a file, `QR#<code>` is a short link, `USAGE#<user_id>` is a storage counter, `USERKEY#<user_id>` records a per-user KMS key, and `AUDIT#...` is an admin log entry.
+- **Two sparse GSIs.** `user-files` (user to files, newest first) only contains file items, because only they have `user_id`. `file-links` (file to links) only contains links. So listing your files is a Query, never a Scan.
+- **TTL plus a stream.** New uploads carry a `ttl` one day out. If the upload never finishes, TTL deletes the record, the stream (set to show the old item) passes the deletion to the `cleanup` Lambda, and it removes the partial file from S3.
+- **Conditional updates.** A download only counts if `downloads < :max`, so two people can't both grab the last download of a limited link. The quota check-and-add on upload is also one conditional update.
+
+### Quibble
+
+[Quibble](/projects/quibble) uses nine on-demand tables, including Users, Questions, Games, GamePlay, Connections, Results and Quizzes.
+
+- **Split by who writes.** `GamesTable` holds one small header per game that changes only between phases. Everything 250 players write at once goes to `GamePlayTable`, where each kind of item gets its own partition key (`<code>#A#<k>` for answers to question k, `<code>#S` for scores...), so no single key takes the whole burst.
+- **Conditional writes for answers.** An answer is stored with `attribute_not_exists(#sk)`, so a resent message keeps its first arrival time. Then the seat is added to the question's gate only while the question is still open.
+- **Transactions for phase changes.** Moving to the next question is a `TransactWriteCommand` guarded by the header's `version` number. If several Lambdas try the same step, exactly one wins.
+- **TTL everywhere it helps.** Games, game-play items, sockets, rate-limit counters and year-old audit entries all expire through an `expiresAt` attribute. The tables you'd hate to lose (Users, Questions, Results, Quizzes, Admin) have point-in-time recovery switched on.
+
+## Try it
+
+See your tables, then check whether TTL is on for one of them:
+
+<Command code={`aws dynamodb list-tables
+aws dynamodb describe-time-to-live --table-name enclave-files-dev`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How DynamoDB is billed">
+
+**On-demand** tables (what both projects use) charge per read request and per write request, plus storage per GB-month. **Provisioned** tables charge per hour for capacity you reserve. Streams, backups and point-in-time recovery are billed extra TODO(verify).
+
+- DynamoDB has had an always-free allowance that includes 25 GB of storage TODO(verify). Check which parts apply to on-demand tables TODO(verify).
+- A Scan reads, and bills, every item it touches. That's one reason both projects avoid scans on everyday requests.
+- Items deleted by TTL don't cost a write TODO(verify).
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="dynamodb-1"
+  question="DropVault lists a user's files without scanning the whole table. How?"
+  options={[
+    "It downloads the table to the browser and filters there",
+    "It caches every file in Lambda memory",
+    "It reads S3 instead of DynamoDB",
+    "It queries the user-files index, which only contains file items",
+  ]}
+  answer={3}
+  explanation="`user-files` is a sparse GSI keyed by `user_id`. Only file items have that attribute, so a Query on it returns exactly one user's files."
+/>
+
+<Quiz
+  id="dynamodb-2"
+  question="Two players' Lambdas try to move the same Quibble game to the next question at the same moment. What stops it happening twice?"
+  options={[
+    "A transaction with a condition on the game header's version number",
+    "DynamoDB only allows one Lambda per table",
+    "The browser decides which one wins",
+  ]}
+  answer={0}
+  explanation="The transaction only commits if `version` still equals the value that was read. The first one wins and bumps the version; the second one's condition fails, so it does nothing."
+/>
+
+<Quiz
+  id="dynamodb-3"
+  question="What does DynamoDB TTL do?"
+  options={[
+    "Makes a table read-only after a date",
+    "Deletes an item some time after the timestamp stored in a chosen attribute",
+    "Limits how many requests a table accepts per second",
+    "Backs up the table every night",
+  ]}
+  answer={1}
+  explanation="You store a Unix timestamp (like `ttl` or `expiresAt`) and DynamoDB deletes the item after that time, in the background and not instantly."
+/>

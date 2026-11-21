@@ -1,0 +1,109 @@
+Amplify Hosting serves a static website (the `dist/` folder a React or Vite build produces) over HTTPS on an `amplifyapp.com` address, with a global CDN in front. You don't create a bucket, a distribution or a certificate yourself: you create an Amplify **app**, add a **branch**, and deploy your files to it.
+
+"Amplify" is also the name of a wider set of AWS tools for building full-stack apps (libraries, a CLI, backend features). This page is only about **Amplify Hosting**, the part that puts a built site online.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Hosting a single-page app (React, Vue, Svelte) with HTTPS in a few minutes",
+    "Brand-new AWS accounts that can't create CloudFront distributions yet",
+    "Automatic builds and deploys every time you push to a Git branch",
+    "Preview sites for different branches",
+  ]}
+  avoid={[
+    "Full control over caching, edge functions and origins: use S3 with CloudFront directly",
+    "Hosting files that aren't a website, like user uploads: use S3",
+    "A backend API: use API Gateway with Lambda",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="App and branch">An **app** is your website. Each **branch** (like `main`) is a deployable copy with its own URL: `https://main.<app-id>.amplifyapp.com`.</Concept>
+  <Concept title="Two ways to deploy">Connect a Git repository and Amplify builds and deploys on every push, or deploy files yourself (**manual deploy**) by uploading a zip of an already-built site.</Concept>
+  <Concept title="Rewrites and redirects">Rules that change what a URL serves. Single-page apps need one: any path without a file extension (like `/login`) should return `index.html` with status 200, so React's router can show the right page.</Concept>
+  <Concept title="Jobs">Each deployment is a **job** with a status: pending, running, `SUCCEED` or `FAILED`. You can watch it in the console or poll it from the CLI.</Concept>
+  <Concept title="CDN and HTTPS included">Amplify Hosting serves your files through a content delivery network and gives you HTTPS automatically TODO(verify). Custom domains can be added later.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) hosts its React app on Amplify by default (`web_hosting = "amplify"` in Terraform). The README explains why it's the default: it works on brand-new accounts, while the CloudFront option needs AWS Support to verify the account first.
+
+- **Terraform creates the app and branch.** `aws_amplify_app` (named `enclave-dev-web`, platform `WEB`) and `aws_amplify_branch` for `main` with stage `PRODUCTION`.
+- **An SPA rewrite rule.** A regex rule sends any path that isn't a real file (not `.js`, `.css`, `.png`...) to `/index.html` with status `200`, so links like `/admin` work when opened directly.
+- **A manual zip deploy.** No Git connection: `deploy.sh` builds the app with the new API URL baked in, zips `dist/`, and then:
+
+```bash title="terraform/deploy.sh (simplified)"
+aws amplify create-deployment --app-id "$AMPLIFY_APP" --branch-name main   # returns jobId + zipUploadUrl
+curl -X PUT -H "Content-Type: application/zip" --data-binary @site.zip "$UPLOAD_URL"
+aws amplify start-deployment --app-id "$AMPLIFY_APP" --branch-name main --job-id "$JOB_ID"
+aws amplify get-job --app-id "$AMPLIFY_APP" --branch-name main --job-id "$JOB_ID"   # repeat until SUCCEED
+```
+
+- **Its URL feeds the rest of the app.** The Amplify address becomes `web_url`, which S3's CORS rules allow and the health check probes.
+
+[Quibble](/projects/quibble) and [this site](/how-this-site-works) don't use Amplify: Quibble serves its frontend straight from S3, and this site uses S3 with CloudFront.
+
+## Try it
+
+List your Amplify apps and their default domains:
+
+<Command code={`aws amplify list-apps --query "apps[].[name,defaultDomain]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Amplify Hosting is billed">
+
+You pay for build minutes (if Amplify builds your code), for storage of your deployed files (GB per month) and for data served to visitors (per GB) TODO(verify). DropVault builds on your laptop and uploads a zip, so it uses no build minutes.
+
+- Amplify Hosting has had a free allowance of build minutes, storage and data served each month TODO(verify).
+- A small student site with a few visitors costs very little.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="amplify-1"
+  question="Why does DropVault default to Amplify Hosting instead of S3 plus CloudFront?"
+  options={[
+    "Amplify is the only way to get HTTPS",
+    "CloudFront can't serve React apps",
+    "Brand-new accounts may need AWS Support verification before they can create CloudFront distributions, and Amplify works right away",
+    "Amplify is required by Terraform",
+  ]}
+  answer={2}
+  explanation="The README and `web.tf` both say so. You can switch to `web_hosting = cloudfront` once your account is verified."
+/>
+
+<Quiz
+  id="amplify-2"
+  question="You open https://main.your-app.amplifyapp.com/login directly and get a 404. What is missing?"
+  options={[
+    "A rewrite rule that serves index.html for app routes",
+    "A bigger Lambda",
+    "An SNS topic",
+  ]}
+  answer={0}
+  explanation="There's no file called `/login`. A single-page app needs a rule that returns `index.html` with status 200, so the browser-side router can show the page."
+/>
+
+<Quiz
+  id="amplify-3"
+  question="How does DropVault's deploy script get the built site into Amplify?"
+  options={[
+    "It pushes to a GitHub repository that Amplify watches",
+    "It copies files with aws s3 sync",
+    "It emails the files to Amplify",
+    "It asks Amplify for an upload URL, PUTs a zip to it, then starts the deployment",
+  ]}
+  answer={3}
+  explanation="`create-deployment` returns a job ID and an upload URL. After the zip is uploaded, `start-deployment` publishes it and `get-job` reports when it has succeeded."
+/>

@@ -1,0 +1,112 @@
+CloudWatch is where you find out what your app is doing once it's live. Everything your Lambda functions print ends up in **CloudWatch Logs**. Every AWS service reports numbers (requests, errors, durations) as **metrics**. **Alarms** watch those numbers and act when something looks wrong, and **dashboards** put the important graphs on one screen.
+
+With serverless apps you can't log into a server to look around, so CloudWatch is your main window into production.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Reading your Lambda logs to debug an error (every print or console.log goes here)",
+    "Getting an alarm when errors, throttles or latency cross a line",
+    "A dashboard to keep open during a live event",
+    "Turning lines in your logs into numbers you can graph and alarm on",
+  ]}
+  avoid={[
+    "Tracing one request as it hops through many services: add AWS X-Ray",
+    "Auditing who changed or deleted a resource: use AWS CloudTrail",
+    "Keeping logs for years cheaply: export or archive them to S3",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Log groups and log streams">A **log group** collects the logs of one thing, like one Lambda function. Inside it, each **log stream** is one source, such as one running copy of the function. Logs are kept forever unless you set a **retention** period.</Concept>
+  <Concept title="Metrics, namespaces and dimensions">A metric is a number over time, like `Errors`. It lives in a **namespace** (`AWS/Lambda`, or your own like `Quibble`) and is split by **dimensions**, like `FunctionName`.</Concept>
+  <Concept title="Alarms">An alarm watches one metric (or a formula over several) and flips between `OK`, `ALARM` and `INSUFFICIENT_DATA`. On a change it can notify an SNS topic or invoke a Lambda function.</Concept>
+  <Concept title="Metric filters and subscription filters">A **metric filter** counts log lines that match a pattern and turns the count into a metric. A **subscription filter** forwards matching log lines, as they arrive, to a Lambda or another destination.</Concept>
+  <Concept title="Logs Insights and dashboards">**Logs Insights** is a query language for searching logs, like `filter level = 'error'`. A **dashboard** is a page of graphs and log tables you build once and reopen anytime.</Concept>
+  <Concept title="Errors your code catches">Lambda's `Errors` metric only counts crashes and timeouts. If your code catches an exception and returns a 500, Lambda counts a success. Both projects work around this by watching the logs too.</Concept>
+</KeyConcepts>
+
+## How our projects use it
+
+### DropVault
+
+[DropVault](/projects/dropvault) builds its monitoring in `terraform/monitoring.tf`.
+
+- **A log group per function** (`/aws/lambda/enclave-dev-...`) with 14-day retention, so logs don't pile up forever.
+- **Alarms that email you through SNS:** one per Lambda on `Errors` (except the authorizer, whose normal 'Unauthorized' answers count as errors), one on the API's `5XXError`, and one on a spike of `4XXError` (throttling or someone probing the API).
+- **Subscription filters.** Each function's log group forwards lines matching `ERROR`, `Task timed out` or `Runtime exited` to the `monitor` Lambda within seconds. That catches errors the code turned into a 500, which the `Errors` alarm never sees.
+- **A live Health page.** The `admin` Lambda reads CloudWatch metrics (`GetMetricData`) and recent log errors (`FilterLogEvents`) to show traffic, latency and errors in the admin panel.
+
+### Quibble
+
+[Quibble](/projects/quibble) creates logs, metrics, 14 alarms and a dashboard in its SAM template.
+
+- **Custom log groups** like `/quibble/quibble/api`, set with each function's `LoggingConfig`, with retention controlled by the `LogRetentionDays` parameter (14 by default).
+- **Structured JSON logs and EMF.** Every log line is JSON, and custom metrics (games started, answers submitted) are written using the **Embedded Metric Format**: a specially shaped log line that CloudWatch turns into a metric in the `Quibble` namespace, with no extra API call.
+- **Metric filters.** `{ $.level = "error" }` on each log group feeds an `ErrorLogLines` metric, watched by the `quibble-error-logs` alarm.
+- **Alarms that invoke a Lambda.** Instead of emailing CloudWatch's raw message, alarms call the `monitor` function, which looks up the matching log lines and sends a readable email. Only `quibble-monitor-errors` emails through SNS directly, as a fallback.
+- **A dashboard** (the `DashboardUrl` output) with games, Lambda concurrency and throttles, DynamoDB throttles, API errors and a live table of recent errors. The README says to keep it open during a big game.
+
+## Try it
+
+Follow a function's logs live, then see any alarms that are currently firing:
+
+<Command code={`aws logs tail /aws/lambda/YOUR-FUNCTION-NAME --follow
+aws cloudwatch describe-alarms --state-value ALARM`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How CloudWatch is billed">
+
+You pay for log data ingested and stored (per GB), custom metrics (per metric per month), alarms (per alarm per month), dashboards and Logs Insights queries (per GB scanned) TODO(verify).
+
+- CloudWatch has had a free monthly allowance that includes 10 custom metrics and 10 alarms TODO(verify).
+- Quibble's README estimates about $0.10 a month per alarm beyond the first 10 and $0.30 per custom metric beyond the first 10 TODO(verify).
+- Setting a log retention period (both projects use 14 days) keeps storage costs from growing forever.
+
+AWS changed the Free Tier for new accounts in 2025 to a credits-based free plan TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="cloudwatch-1"
+  question="A Lambda catches an exception, logs it and returns a 500. What does Lambda's built-in Errors metric record?"
+  options={[
+    "One error",
+    "Nothing: the function returned normally, so it counts as a success",
+    "A throttle",
+    "An INSUFFICIENT_DATA state",
+  ]}
+  answer={1}
+  explanation="`Errors` only counts crashes and timeouts. That's why DropVault forwards ERROR log lines to its monitor and Quibble counts `level: error` lines with a metric filter."
+/>
+
+<Quiz
+  id="cloudwatch-2"
+  question="How does Quibble publish custom metrics like GamesStarted without calling the CloudWatch API?"
+  options={[
+    "It writes them to DynamoDB and CloudWatch reads the table",
+    "It emails them to CloudWatch",
+    "It prints a specially shaped JSON log line (Embedded Metric Format)",
+  ]}
+  answer={2}
+  explanation="With EMF, a log line containing an `_aws` block is turned into a real metric by CloudWatch. No extra API calls or IAM permissions are needed."
+/>
+
+<Quiz
+  id="cloudwatch-3"
+  question="What happens to CloudWatch logs if you never set a retention period?"
+  options={[
+    "They are kept forever, and you keep paying to store them",
+    "They are deleted after 24 hours",
+    "They move to S3 automatically",
+    "They are deleted when the Lambda is updated",
+  ]}
+  answer={0}
+  explanation="The default is never expire. Both projects set 14 days so old logs clean themselves up."
+/>

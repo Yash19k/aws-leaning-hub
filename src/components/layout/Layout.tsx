@@ -1,8 +1,6 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { MDXProvider } from '@mdx-js/react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { mdxComponents } from '@/components/guide/mdxComponents';
 import { useBadgeWatcher } from '@/lib/badges';
 import { useReducedMotion } from '@/lib/hooks';
 import { Celebration } from './Celebration';
@@ -66,7 +64,7 @@ export function Layout() {
   }, []);
 
   return (
-    <MDXProvider components={mdxComponents}>
+    <>
       <div className="flex min-h-dvh flex-col">
         <Navbar onSearch={() => setSearchOpen(true)} />
         <main id="main" className="flex-1">
@@ -89,6 +87,6 @@ export function Layout() {
         <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
         <Celebration />
       </div>
-    </MDXProvider>
+    </>
   );
 }

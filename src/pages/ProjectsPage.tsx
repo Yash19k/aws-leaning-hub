@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
+import { NextUp } from '@/components/project/NextUp';
 import { ComingSoonCard, ProjectCard } from '@/components/project/ProjectCard';
 import { DifficultyBadge, ServiceChip } from '@/components/ui/Badge';
 import { SectionHeading } from '@/components/ui/SectionHeading';
@@ -65,6 +66,14 @@ export default function ProjectsPage() {
           </table>
         </div>
       </section>
+
+      <NextUp
+        items={[
+          { to: '/setup', title: 'New to AWS?', description: 'Set up your account safely before you build.' },
+          { to: '/services', title: 'Browse the services', description: 'Every AWS service in these projects, explained.' },
+          { to: '/how-this-site-works', title: 'How this site runs on AWS', description: 'The smallest real architecture: S3 + CloudFront.' },
+        ]}
+      />
     </div>
   );
 }

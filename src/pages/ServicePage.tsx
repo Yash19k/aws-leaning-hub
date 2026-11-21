@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowRight, BookOpen, ExternalLink, MousePointerClick, Quote } from 'lucide-react';
+import { MdxScope } from '@/components/guide/MdxScope';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { PageLoader } from '@/components/layout/Layout';
 import { NextUp } from '@/components/project/NextUp';
@@ -74,7 +75,9 @@ export default function ServicePage() {
         <article className="prose-hub max-w-none">
           {Body ? (
             <Suspense fallback={<PageLoader />}>
-              <Body />
+              <MdxScope>
+                <Body />
+              </MdxScope>
             </Suspense>
           ) : (
             <p className="text-muted">This page is being written.</p>

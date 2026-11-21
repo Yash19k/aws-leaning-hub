@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Search, X } from 'lucide-react';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
+import { NextUp } from '@/components/project/NextUp';
 import { CATEGORIES, CATEGORY_ORDER } from '@/lib/categories';
 import { cn } from '@/lib/cn';
 import { getProject, services } from '@/lib/content';
@@ -119,6 +120,14 @@ export default function ServicesIndex() {
           ))}
         </AnimatePresence>
       </div>
+
+      <NextUp
+        items={[
+          { to: '/projects', title: 'See them working together', description: 'Explore a project diagram and watch requests flow.' },
+          { to: '/setup', title: 'Set up your own account', description: 'Nine short guides, from sign-up to first deploy.' },
+          { to: '/progress', title: 'Collect badges', description: 'Each service page ends with a quick quiz.' },
+        ]}
+      />
     </div>
   );
 }

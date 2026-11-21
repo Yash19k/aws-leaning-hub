@@ -6,6 +6,7 @@ import { CodePeek } from '@/components/diagram/CodePeek';
 import { DiagramProvider, useDiagram } from '@/components/diagram/DiagramContext';
 import { FlowPlayer } from '@/components/diagram/FlowPlayer';
 import { WhatIfCards } from '@/components/diagram/WhatIfCards';
+import { MdxScope } from '@/components/guide/MdxScope';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { CostTable } from '@/components/project/CostTable';
 import { MiniDiagram } from '@/components/project/MiniDiagram';
@@ -53,7 +54,9 @@ function Mdx({ project, name }: { project: Project; name: 'overview' | 'faq' }) 
   if (!Comp) return <p className="text-muted">Coming soon.</p>;
   return (
     <Suspense fallback={<div className="h-24 animate-pulse rounded-2xl bg-surface-2" />}>
-      <Comp />
+      <MdxScope>
+        <Comp />
+      </MdxScope>
     </Suspense>
   );
 }

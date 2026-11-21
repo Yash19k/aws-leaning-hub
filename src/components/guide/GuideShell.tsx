@@ -7,6 +7,7 @@ import { PageLoader } from '@/components/layout/Layout';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { cn } from '@/lib/cn';
 import { GuideProvider, useGuide } from './GuideContext';
+import { MdxScope } from './MdxScope';
 
 function Toc({ onPick }: { onPick?: () => void }) {
   const g = useGuide();
@@ -143,7 +144,9 @@ export function GuideShell({
             <article className="prose-hub max-w-none">
               {Content ? (
                 <Suspense fallback={<PageLoader />}>
-                  <Content />
+                  <MdxScope>
+                    <Content />
+                  </MdxScope>
                 </Suspense>
               ) : (
                 <p className="text-muted">This guide is being written. Check back soon.</p>

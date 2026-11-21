@@ -240,10 +240,10 @@ Condition:
     'token.actions.githubusercontent.com:aud': sts.amazonaws.com
   StringLike:
     'token.actions.githubusercontent.com:sub':
-      - !Sub 'repo:\${GitHubRepo}:ref:refs/heads/\${GitHubBranch}'
-      - !Sub 'repo:\${GitHubRepo}:environment:production'`,
+      - !Sub '\${GitHubSubjectPrefix}:ref:refs/heads/\${GitHubBranch}'
+      - !Sub '\${GitHubSubjectPrefix}:environment:production'`,
       explanation:
-        'GitHub signs a token describing the workflow run. IAM only hands out credentials if the token is meant for AWS (`aud`) and comes from this repository\'s main branch or its `production` environment (`sub`). Forks and other branches are refused. Gotcha: a job that uses a GitHub environment gets the `environment:` subject, not the branch one, which is why both are listed.',
+        'GitHub signs a token describing the workflow run. IAM only hands out credentials if the token is meant for AWS (`aud`) and comes from this repository\'s main branch or its `production` environment (`sub`). The subject prefix pins the owner and repo **IDs** (`repo:Yash19k@185833654/aws-leaning-hub@1466841198`), so even a re-created repo with the same name is refused. Two gotchas we hit deploying this: a job that uses a GitHub environment gets the `environment:` subject instead of the branch one, and newer repos use these ID-pinned subjects.',
       highlightLines: [6, 7, 8],
     },
   ],

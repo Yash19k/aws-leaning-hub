@@ -17,6 +17,12 @@ Parameters:
     Type: String
     Default: Yash19k/aws-leaning-hub
     Description: owner/name of the GitHub repository allowed to deploy
+  GitHubSubjectPrefix:
+    Type: String
+    Default: 'repo:Yash19k@185833654/aws-leaning-hub@1466841198'
+    Description: >
+      The repo's immutable OIDC subject prefix (owner and repo IDs pinned, so a renamed or re-created
+      repo can't impersonate it). Find it with: gh api repos/<owner>/<repo>/actions/oidc/customization/sub
   GitHubBranch:
     Type: String
     Default: main
@@ -213,7 +219,10 @@ Resources:
                 'token.actions.githubusercontent.com:aud': sts.amazonaws.com
               StringLike:
                 # A job that uses a GitHub environment gets an "environment:<name>" subject instead of the branch ref.
+                # Newer repos use the immutable form (GitHubSubjectPrefix); older ones the plain repo name.
                 'token.actions.githubusercontent.com:sub':
+                  - !Sub '${GitHubSubjectPrefix}:ref:refs/heads/${GitHubBranch}'
+                  - !Sub '${GitHubSubjectPrefix}:environment:production'
                   - !Sub 'repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
                   - !Sub 'repo:${GitHubRepo}:environment:production'
       Policies:

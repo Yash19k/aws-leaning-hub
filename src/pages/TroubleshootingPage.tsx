@@ -5,7 +5,8 @@ import { ChevronDown, ClipboardPaste, Lightbulb, ListOrdered, TerminalSquare, Wr
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { NextUp } from '@/components/project/NextUp';
 import { cn } from '@/lib/cn';
-import { getProject, troubleshootingItems } from '@/lib/content';
+import { troubleshootingItems } from '@/content/troubleshooting/troubleshooting';
+import { getProject } from '@/lib/content';
 import { useDebounced, useReducedMotion } from '@/lib/hooks';
 import { inline } from '@/lib/markdown';
 import { usePageMeta } from '@/lib/meta';

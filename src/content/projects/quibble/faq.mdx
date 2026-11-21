@@ -1,0 +1,57 @@
+<FaqList>
+  <FaqItem q="Will building Quibble cost me money?">
+
+Very little, if you clean up. Lambda, API Gateway and DynamoDB on-demand are all pay-per-use and fall within or near the Free Tier for a hobby project; the README puts a 10-question game with 5 players at a fraction of a cent. The one thing that always runs after you deploy is the uptime monitor (once a minute) with its 14 alarms, and CloudWatch charges a little for alarms beyond the first 10 TODO(verify). Set a [billing alarm](/setup/billing-alarm) first and delete the stack when you are done ([cleanup](/projects/quibble/build#step-32)).
+
+  </FaqItem>
+  <FaqItem q="Why do I have to ask AWS for a bigger Lambda quota?">
+
+Every Lambda function in your account and Region shares one pool of concurrent executions. The README notes that new accounts get only 10, and a 250-player game can need hundreds at the same moment. Nothing breaks with 10 (API Gateway refuses the extra calls and the page resends them), but phases arrive seconds late and answers near the buzzer can miss. Asking for the standard 1,000 is free: `npm run quota:lambda -- --request`. The README says it is usually approved within a day TODO(verify). Until then, deploy with `LateGraceMs=5000`.
+
+  </FaqItem>
+  <FaqItem q="Why WebSockets? Couldn't every phone just ask the server once a second?">
+
+It could, but 250 phones polling once a second is 250 requests a second, every second, mostly answered with "nothing new". It is also slow: a result could show up to a second late. With a WebSocket the connection stays open, so the server pushes "the question is closed" to everyone the moment it happens, and phones only send something when the player taps.
+
+  </FaqItem>
+  <FaqItem q="Can a player cheat by reading the answer in the browser's developer tools?">
+
+No. The browser never receives the answer before the reveal: `lib/views.js` strips the answer key from everything sent during a question. The phone only sends "I picked option 2". The server checks the answer, runs the clock and computes the score, and it measures speed from the moment API Gateway received the answer, not from anything the browser claims.
+
+  </FaqItem>
+  <FaqItem q="My first deploy failed on the S3 bucket policy. What do I do?">
+
+S3 Block Public Access is switched on for your whole account, so CloudFormation may not attach the public-read policy the website bucket needs. In the S3 console, turn off the account-level setting for "new public bucket policies", then deploy again. If the failed stack is stuck in `ROLLBACK_COMPLETE`, delete it first with `sam delete --stack-name quibble` TODO(verify). [Step 22](/projects/quibble/build#step-22) walks through it.
+
+  </FaqItem>
+  <FaqItem q="Do I need an AWS account to try it?">
+
+Not to play with it. `npm run dev` runs the real Lambda handlers on your laptop against DynamoDB Local in Docker, with a small Node server standing in for both API Gateway APIs. Open two browser windows (one private) and play against yourself. It can even pretend to be a 10-slot account and drop some `$disconnect` events, just like AWS.
+
+  </FaqItem>
+  <FaqItem q="Why is the game-timer allowed to call itself?">
+
+A game is a chain: the question timer schedules the reveal timer, which opens the next question and schedules its timer, and so on. Lambda's recursive-loop detection would stop that chain after about 16 hops, which is the middle of a game, so the template sets `RecursiveLoop: Allow` on that one function. You need SAM CLI 1.123 or newer to deploy that setting, which is why the preflight checks your SAM version.
+
+  </FaqItem>
+  <FaqItem q="Where are passwords and login tokens kept?">
+
+Passwords are stored only as bcrypt hashes in the Users table. Login tokens are JWTs signed with a secret that `npm run deploy` generates once and keeps in `aws/.jwt-secret` (git-ignored); it reaches Lambda as a `NoEcho` template parameter and an environment variable. The README lists moving that secret to SSM Parameter Store or Secrets Manager as a production improvement.
+
+  </FaqItem>
+  <FaqItem q="Can I deploy a change during a live game?">
+
+Please don't. A deploy swaps the code and settings under games that are running, which, in the preflight script's own words, "can disturb them". `npm run preflight` (and `npm run deploy`, which runs it first) warns you when games are live. Deploy before the event, or after the last game has ended.
+
+  </FaqItem>
+  <FaqItem q="How many players can one game hold?">
+
+250 by default, which is what the load test checks. It is the `MaxPlayers` template parameter (1 to 1,000), enforced by an atomic seat counter on the lobby gate, so even a crowd joining in the same second cannot squeeze in player 251. Going above 250 is untested, and you would need the full Lambda quota.
+
+  </FaqItem>
+  <FaqItem q="I lost the admin password that npm run seed printed. Now what?">
+
+Running the seed again will not change an existing admin's password. Put a different `ADMIN_EMAIL` (and an `ADMIN_PASSWORD` of 10 or more characters) in `.env` and run `npm run seed` again: it creates a second admin account. From the admin console you can then reset the first account's password.
+
+  </FaqItem>
+</FaqList>

@@ -1,0 +1,1188 @@
+In this guide you will read Quibble's code, run it on your laptop, deploy it to your own AWS account with one command, play a real game from your phone, and then host a quiz night for your club. Along the way you will see exactly how a stateless Lambda can run a live, 250-player game.
+
+<Callout type="info" title="Coming from DropVault?">
+
+You already met API Gateway (as a REST API), Lambda, S3 and DynamoDB in [DropVault](/projects/dropvault), which was built with Terraform. Quibble uses the same services in new ways and is deployed with [AWS SAM](/services/cloudformation). This guide links back to the basics instead of repeating them, and spends its time on what is new: WebSockets, pushing to browsers, timers without servers, and races between Lambdas.
+
+</Callout>
+
+## Before you start
+
+Finish these setup guides first. Each one is short, and the last two are about SAM, the tool Quibble deploys with.
+
+<Prerequisite slug="create-aws-account" />
+<Prerequisite slug="secure-your-account" />
+<Prerequisite slug="billing-alarm" />
+<Prerequisite slug="iam-user-and-keys" />
+<Prerequisite slug="install-tools" />
+<Prerequisite slug="configure-aws-cli" />
+<Prerequisite slug="install-sam-cli" />
+<Prerequisite slug="first-sam-deploy" />
+
+You also need:
+
+- **Node.js 22 or newer.** Every Lambda runs on Node.js 22, and the deploy scripts do too.
+- **AWS SAM CLI 1.123 or newer.** Older versions cannot deploy the game-timer's `RecursiveLoop` setting.
+- **Docker**, only for the optional local run in Part 2 ([get Docker](https://docs.docker.com/get-docker/)).
+- **A phone or two** to play with.
+
+Check your tools:
+
+<Command
+  code={`node --version
+sam --version
+aws sts get-caller-identity`}
+  output={`v22.x.x
+SAM CLI, version 1.1xx.x
+{
+    "UserId": "AIDA...",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/your-user"
+}`}
+/>
+
+<Callout type="cost" title="What this will cost">
+
+Everything is pay-per-use and nothing runs while idle, except one thing: once deployed, a monitor Lambda probes your site every minute, and the template creates 14 CloudWatch alarms. CloudWatch charges for alarms beyond the first 10 (about $0.10 each a month, says the README) TODO(verify). Games themselves cost fractions of a cent. Delete the stack when you finish ([Part 11](#step-32)).
+
+</Callout>
+
+<Callout type="warning" title="Pick one Region and stay in it">
+
+This guide uses **ap-south-1 (Mumbai)**, the Region you chose in the AWS CLI guide. Quibble deploys to whatever Region your CLI profile uses, and the Lambda quota you will raise in Part 5 is per Region.
+
+</Callout>
+
+## Part 1: Get the code
+
+<Step number={1} title="Clone the repo and look around">
+
+Download the code and move into the folder:
+
+<Command code={`git clone https://github.com/Yash19k/quibble.git
+cd quibble`} />
+
+Here is what you just downloaded:
+
+```bash
+quibble/
+  public/                    # the frontend: vanilla JS, no build step, uploaded to S3
+    index.html play.html admin.html
+    js/app.js                # the player app
+    js/realtime.js           # WebSocket client: acks, resends, auto-reconnect
+    js/net.js                # HTTP client with retries and backoff
+  aws/
+    template.yaml            # ALL the infrastructure (AWS SAM / CloudFormation)
+    backend/src/handlers/    # Lambda entry points: http, wsConnect, wsMessage, wsDisconnect, gameTimer, monitor
+    backend/src/lib/         # game engine (game.js), storage layout (gamedata.js), push, timer, scoring, auth
+    scripts/                 # deploy, publish, seed, preflight, quota
+    local/dev-server.mjs     # runs the real Lambda handlers on your laptop
+    tests/                   # unit, end-to-end and load tests
+  package.json               # npm scripts: dev, deploy, seed, preflight, quota:lambda ...
+```
+
+Notice there are **two** `package.json` files. The one at the root holds the scripts and the tools they use (AWS SDK clients for deploying, `ws` for tests). The one in `aws/backend/` lists only what the Lambda functions need at runtime, and that folder is what SAM packages and uploads. Keeping them apart keeps every Lambda package small.
+
+</Step>
+
+<Step number={2} title="Install the dependencies">
+
+<Command code={`npm install`} />
+
+The root `package.json` has a `postinstall` script that also runs `npm --prefix aws/backend install`, so one command installs both sets of packages.
+
+<Checkpoint>
+
+Both installs finish without errors, and you now have `node_modules/` at the root and `aws/backend/node_modules/`.
+
+</Checkpoint>
+
+</Step>
+
+## Part 2: Play it on your laptop first
+
+This part is optional, but worth 10 minutes. You see the game working before you spend a cent, and you can break things freely.
+
+<Step number={3} title="Run the real Lambda handlers locally">
+
+Start DynamoDB Local (a free, offline copy of DynamoDB that runs in Docker), then the dev server:
+
+<Command code={`docker run -d -p 8000:8000 --name quibble-dynamodb amazon/dynamodb-local
+npm run dev`} />
+
+<Checkpoint output={`created table quibble-local-users
+...
+seeded admin admin@example.com / admin12345
+seeded 155 questions
+Quibble (local AWS emulation) on http://localhost:5050
+  emulator counters: GET /__local/stats[?reset=1]`}>
+
+The first run creates the tables and loads 155 sample questions. Open `http://localhost:5050`, log in as `admin@example.com` with password `admin12345` (unless your `.env` sets another), and press **Create game**. Then open a private window, sign up as a second player and join with the code.
+
+</Checkpoint>
+
+`npm run dev` is not a fake version of Quibble. It loads the **same handler files** that run on AWS and plugs them into stand-ins:
+
+- DynamoDB Local instead of DynamoDB.
+- A small Node server instead of the HTTP API (`/api/*` goes to `handlers/http.js`).
+- A `ws` WebSocket server instead of the WebSocket API, calling the `$connect`, `$default` and `$disconnect` handlers.
+- The game-timer runs in the same process, queued like an asynchronous Lambda invoke.
+- `public/` is served the way S3 serves it.
+
+<Callout type="tip" title="Feel what a brand-new AWS account is like">
+
+The dev server can pretend your account only allows 10 Lambdas at once, and can skip some `$disconnect` events the way AWS sometimes does:
+
+<Command
+  windows={`$env:LOCAL_LAMBDA_CONCURRENCY=10; $env:LOCAL_DROP_DISCONNECT_PCT=10; npm run dev`}
+  mac={`LOCAL_LAMBDA_CONCURRENCY=10 LOCAL_DROP_DISCONNECT_PCT=10 npm run dev`}
+  linux={`LOCAL_LAMBDA_CONCURRENCY=10 LOCAL_DROP_DISCONNECT_PCT=10 npm run dev`}
+/>
+
+Play a game with several tabs and watch `http://localhost:5050/__local/stats` count the throttles.
+
+</Callout>
+
+Stop the server with `Ctrl+C`. Stop DynamoDB Local with `docker stop quibble-dynamodb` (start it again later with `docker start quibble-dynamodb`).
+
+</Step>
+
+## Part 3: Read the template, section by section
+
+Everything Quibble creates in AWS is described in one file, `aws/template.yaml`. It is an AWS SAM template: CloudFormation plus shortcuts like `AWS::Serverless::Function`. You deployed a tiny one in [Your first deploy](/setup/first-sam-deploy). This one is bigger, so take it one section at a time.
+
+<Step number={4} title="Parameters and Globals">
+
+A <Term t="parameter">A value you pass in at deploy time, so the same template can be deployed with different settings.</Term> is a setting you can change without editing the template. These two matter most for a quiz night:
+
+```yaml title="aws/template.yaml"
+  MaxPlayers:
+    Type: Number
+    Default: 250
+    MinValue: 1
+    MaxValue: 1000
+    Description: Most players one game accepts (load-tested at 250).
+  LateGraceMs:
+    Type: Number
+    Default: 1500
+    MinValue: 1
+    MaxValue: 10000
+    Description: >
+      Answers that reached API Gateway up to this long after a question's timer hit zero still count.
+      Raise it (e.g. 5000) while the account's Lambda concurrency quota is still low.
+```
+
+The others: `JwtSecret` (the key that signs login tokens; `NoEcho` hides it in the console and the deploy script generates it for you), `RevealMs` (the 4-second pause on each result), `LogRetentionDays` (14), `AlertEmail` and `AlertTimeZone` (for email alerts), and `ExtraCorsOrigin` (lets the local dev server call a deployed API).
+
+`Globals` sets defaults for every function, so they are not repeated six times:
+
+```yaml title="aws/template.yaml" {3-4,6}
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    CodeUri: backend/
+    MemorySize: 512 # more memory = more CPU: fan-out to 250 sockets and JSON work finish sooner
+    Timeout: 15
+    # No reserved concurrency anywhere: it carves slots out of the shared account pool (and is impossible while the
+    # account quota is still the 10-slot default).
+    Environment:
+      Variables:
+        USERS_TABLE: !Ref UsersTable
+        # ... one variable per table ...
+        WS_ENDPOINT: !Sub 'https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${WebSocketStageName}'
+        # A plain name (not !Ref) so the timer function can reference itself without a circular dependency.
+        TIMER_FUNCTION: !Sub '${AWS::StackName}-game-timer'
+```
+
+Why these choices:
+
+- **arm64** (Graviton) costs less per second of compute than x86 TODO(verify), and nothing in Quibble needs x86.
+- **512 MB:** in Lambda, more memory also means more CPU. Pushing a result to 250 sockets is lots of small network calls and JSON work, which finishes sooner with more CPU.
+- **Table names come in as environment variables** (`!Ref UsersTable`), so the code never hard-codes a name. CloudFormation picks names like `quibble-UsersTable-1A2B3C`.
+- **`WS_ENDPOINT`** is the address Lambdas call to push messages to browsers (Step 8 explains it).
+- **`TIMER_FUNCTION`** is a plain string, not a `!Ref`. The game-timer invokes itself, and a function cannot `!Ref` itself without CloudFormation complaining about a circular dependency.
+
+</Step>
+
+<Step number={5} title="The nine DynamoDB tables">
+
+All nine tables use `BillingMode: PAY_PER_REQUEST`, which DynamoDB calls <Term t="on-demand">You pay for each read and write instead of reserving capacity in advance. An idle table costs only its storage.</Term> mode.
+
+| Table | What it holds | Hot during a game? |
+|---|---|---|
+| Games | One small header per game: status, current question, deadlines, `version` | Rarely written (phase changes only) |
+| GamePlay | Everything many players write at once: seats, answers, question gates, scores | Yes |
+| Connections | One item per open WebSocket | Yes (connects, disconnects) |
+| Users | Accounts, `currentGame`, `sessionVersion` | Read on every message |
+| Questions | The question bank | Read when a game is created |
+| Results | Each player's game results, plus the leaderboards | Written when a game ends |
+| Quizzes | Quizzes players build ("My quizzes") | No |
+| RateLimits | Sign-up and failed-login counters | No |
+| Admin | Audit log and the announcement banner | No |
+
+Five tables (Users, Questions, Results, Quizzes, Admin) turn on point-in-time recovery, DynamoDB's continuous backup. Five use <Term t="TTL">Time to live: you store an expiry time on each item, and DynamoDB deletes the item for free some time after it passes.</Term> so old games, sockets and counters clean themselves up.
+
+The two game tables are the interesting ones:
+
+```yaml title="aws/template.yaml"
+  # One small header item per game, written only when the game changes phase.
+  GamesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: code, AttributeType: S }]
+      KeySchema: [{ AttributeName: code, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: expiresAt, Enabled: true }
+
+  # Everything many players write at once (seats, answers, question gates, scores, results). Each item family has
+  # its own partition key (<code>#P, <code>#A#<k>, <code>#Q ...) so no key takes more than one family's burst and
+  # every key stays far below DynamoDB's per-partition limits. Items expire a day after the game.
+  GamePlayTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TimeToLiveSpecification: { AttributeName: expiresAt, Enabled: true }
+```
+
+To see why GamePlay is designed this way, you need one idea. DynamoDB spreads items over storage partitions using each item's <Term t="partition key">The part of an item's key that decides which storage partition holds it. Items with the same partition key live together.</Term>. Each single key value can take only so much traffic: the README works with about 1,000 writes and 3,000 reads per second. If all 250 answers updated one big "game" item, that one key would get the whole burst, a so-called hot key.
+
+Think of a supermarket with one checkout counter versus ten. Quibble opens a separate counter for each kind of item. Here are the real keys from `lib/gamedata.js`, for a game with code `K7M2QX`:
+
+| Partition key | Sort key | Holds | Written at once by |
+|---|---|---|---|
+| `K7M2QX#M` | `Q` | The game's questions (never change) | Nobody after creation |
+| `K7M2QX#L` | `L` | Lobby gate: open flag, seat counter, player limit | Everyone joining |
+| `K7M2QX#P0` to `K7M2QX#P3` | user id | One member item per player: seat and open sockets (`conns`) | Sockets attaching, spread over 4 keys |
+| `K7M2QX#Q` | question index | One gate per question: deadline, answered count, seats that answered | Everyone answering |
+| `K7M2QX#A#3` | seat | One item per answer to question 3 | Everyone answering, one item each |
+| `K7M2QX#S` | `S` | Running scores | The closer, once per question |
+| `K7M2QX#R` | question index | Each question's result | The closer |
+| `K7M2QX#B` | `B` | Claims: a pending lobby push, the un-stick lease | Rarely |
+| `K7M2QX#E0` to `K7M2QX#E3` | `E` | Emoji reaction counters | Everyone reacting, spread over 4 keys |
+
+And the Games header is the opposite: one small item that changes only when the game moves to a new phase. That split, **state divided by who writes it**, is the core design idea of the whole project.
+
+</Step>
+
+<Step number={6} title="The website bucket">
+
+```yaml title="aws/template.yaml" {12,23-24}
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false # the bucket policy below makes objects publicly readable
+        RestrictPublicBuckets: false
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadForWebsite
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+```
+
+In DropVault the bucket was private and every download needed a presigned link. Here the bucket is **public on purpose**: it only holds the website's HTML, CSS and JavaScript, which every player's browser must download anyway. The bucket policy allows anyone to `GetObject` (read files) and nothing else. Old-style ACLs stay blocked; only the policy grants access.
+
+Players use the bucket's HTTPS address, `https://<bucket>.s3.<region>.amazonaws.com/index.html` (the `WebsiteUrl` output). S3's "static website" address also exists, but it is plain HTTP and browsers warn about it. The HTTPS address has no index page, so links always name a file, such as `/play.html?code=K7M2QX`.
+
+<Callout type="security" title="Nothing secret in this bucket">
+
+Everything in it is public. The only generated file, `config.js`, contains just the two API URLs. Passwords and the JWT secret never come near it.
+
+</Callout>
+
+</Step>
+
+<Step number={7} title="The HTTP API (the familiar part)">
+
+This is the request-and-response side: sign-up, login, leaderboards, match history, My quizzes and the admin console. DropVault used API Gateway's REST API type; this is the HTTP API type, a lighter and cheaper flavour with fewer features TODO(verify).
+
+```yaml title="aws/template.yaml"
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub 'https://${FrontendBucket.RegionalDomainName}' # the HTTPS page players open
+          - !GetAtt FrontendBucket.WebsiteURL # the old HTTP website endpoint
+          - !Ref ExtraCorsOrigin
+        AllowHeaders: [content-type, authorization]
+        AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+        ExposeHeaders: [retry-after] # the page honours Retry-After when it backs off
+        MaxAge: 600
+      # Whole-API ceiling (the account allows 10,000 rps shared by every API). 200 sign-ups at once is far below.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 2000
+        ThrottlingRateLimit: 1000
+```
+
+<Term t="CORS">Cross-Origin Resource Sharing: browser rules that block a page on one address from calling an API on another, unless the API says that page is allowed.</Term> matters because the page lives on `s3.amazonaws.com` and the API on `execute-api.amazonaws.com`. The API lists exactly which pages may call it.
+
+The function side uses a single catch-all route:
+
+```yaml title="aws/template.yaml"
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/{proxy+}
+            Method: ANY
+```
+
+Every `/api/...` request goes to one Lambda (`handlers/http.js`), which matches the path against its own list of routes. One function keeps cold starts and deploys simple for a small API.
+
+</Step>
+
+<Step number={8} title="The WebSocket API (the new part)">
+
+This is where Quibble stops looking like DropVault.
+
+**A normal HTTP request is like sending a letter.** The browser asks, the server answers, and the conversation is over. The server can never start a conversation; if something changes, it has to wait until the browser asks again.
+
+**A WebSocket is like a phone call.** The browser makes one special HTTP request (a handshake that asks to "upgrade" the connection), and from then on the connection stays open. Either side can send a message, called a frame, at any moment. That is exactly what a quiz needs: the server must tell 250 phones "time's up" the instant it happens.
+
+You do not run a server to hold those open connections. **API Gateway holds them for you**, and calls your Lambda functions only when something happens. It calls them through three special routes:
+
+| Route | When API Gateway uses it | Quibble's Lambda | What it does |
+|---|---|---|---|
+| `$connect` | During the handshake, before the socket is accepted | ws-connect | Checks the login token; a 401 refuses the connection |
+| `$default` | For any frame that matches no other route | ws-message | Every game action: join, start, answer, react, sync |
+| `$disconnect` | After a socket closes, on a best-effort basis | ws-disconnect | Marks the player offline |
+
+```yaml title="aws/template.yaml" {6,18}
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${AWS::StackName}-ws'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: '$request.body.action'
+
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsConnectFunction.Arn}/invocations'
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE # the Lambda checks the JWT itself
+      Target: !Sub 'integrations/${ConnectIntegration}'
+```
+
+The `$disconnect` and `$default` routes follow the same pattern. `RouteSelectionExpression` tells API Gateway to read the `action` field of each JSON frame to pick a route. Quibble's browser sends every frame like this (from `public/js/realtime.js`):
+
+```javascript title="public/js/realtime.js"
+        frame: JSON.stringify({ action: 'message', id, event, data }),
+```
+
+There is no route called `message`, so every frame falls through to `$default`, and ws-message reads the `event` field (`room:join`, `answer:submit` ...) itself. The stage adds a throttle with plenty of headroom, because 250 players answering within the same 100 ms is a 250-message burst:
+
+```yaml title="aws/template.yaml"
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref WebSocketStageName
+      DeploymentId: !Ref WebSocketDeployment
+      # 250 players answering within the same 100 ms is a 250-message burst; leave plenty of headroom.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 2000
+        ThrottlingRateLimit: 1000
+```
+
+Each of the three functions also gets an `AWS::Lambda::Permission`, which allows API Gateway (`apigateway.amazonaws.com`) to invoke it.
+
+**Talking back.** A Lambda never holds a socket. When it wants to send something to a browser, it calls API Gateway's **Management API** at the `WS_ENDPOINT` address from Step 4, using the action `PostToConnection` with the socket's connection id. API Gateway delivers the message down that open connection. To broadcast a question, a Lambda makes one `PostToConnection` call per player socket, all in parallel. You can see the code in the "Pushing to every socket" code peek on the project page.
+
+<Callout type="warning" title="Why connections are harder than requests">
+
+- **Connections drop.** Phones switch networks and tabs sleep. A socket can die silently.
+- **`$disconnect` is best effort.** AWS tries to tell you a socket closed, but the call can be late or never arrive, so nothing may depend on it.
+- **Idle and maximum time.** API Gateway closes a socket after 10 minutes of silence and after 2 hours in total (README). `realtime.js` pings every 5 minutes and simply reconnects after the 2-hour cut.
+- **Reconnects get a new id.** The same player comes back with a different connection id, so the server must re-attach it to the game.
+- **Pushes can arrive late or twice.** Every push carries the game's `version` (`v`), and the browser ignores anything older than what it already shows.
+
+</Callout>
+
+<Quiz
+  question="A player taps an answer. Which route does API Gateway send that frame to?"
+  options={["$connect", "$default", "$disconnect", "A route named answer:submit"]}
+  answer={1}
+  explanation="The frame says action: 'message'. No route has that name, so it goes to $default, and ws-message reads event: 'answer:submit' itself. $connect only runs during the handshake."
+/>
+
+</Step>
+
+<Step number={9} title="The functions and their permissions">
+
+| Function | Handler | Started by | Memory, timeout |
+|---|---|---|---|
+| api | `handlers/http.js` | HTTP API (`/api/*`) | 1,769 MB, 20 s |
+| ws-connect | `handlers/wsConnect.js` | `$connect` | 512 MB, 15 s |
+| ws-message | `handlers/wsMessage.js` | `$default` | 512 MB, 15 s |
+| ws-disconnect | `handlers/wsDisconnect.js` | `$disconnect` | 512 MB, 15 s |
+| game-timer | `handlers/gameTimer.js` | Async invoke from the other functions (and itself) | 512 MB, 120 s |
+| monitor | `handlers/monitor.js` | EventBridge schedule and rule, CloudWatch alarms | 256 MB, 60 s |
+
+The api function gets 1,769 MB because bcrypt password hashing is CPU-heavy and a whole classroom may sign up at once. Here is ws-message:
+
+```yaml title="aws/template.yaml"
+  WsMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: WebSocket $default - game actions (create, join, start, answer...)
+      Handler: src/handlers/wsMessage.handler
+      LoggingConfig: { LogGroup: !Ref WsLogGroup }
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref UsersTable } # creating a game is one transaction with the user item
+        - DynamoDBReadPolicy: { TableName: !Ref QuestionsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref QuizzesTable } # hosting one of My quizzes
+        - DynamoDBCrudPolicy: { TableName: !Ref GamesTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref GamePlayTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ConnectionsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ResultsTable }
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/${WebSocketStageName}/*/@connections/*'
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-game-timer'
+```
+
+SAM turns each `Policies` list into an <Term t="IAM role">An identity with a set of permissions that an AWS service (here, a Lambda function) takes on while it runs.</Term> for that one function. `DynamoDBReadPolicy` and `DynamoDBCrudPolicy` are SAM shortcuts for "read" and "read and write" on one table. The two custom statements are the real-time ones: `execute-api:ManageConnections` lets this function push to sockets of this API's stage only, and `lambda:InvokeFunction` lets it start the game-timer and no other function. ws-connect, by contrast, can only read Users and write Connections.
+
+The game-timer has a few special settings:
+
+```yaml title="aws/template.yaml"
+  GameTimerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-game-timer'
+      Description: Waits for a question/reveal deadline, then advances the game
+      Handler: src/handlers/gameTimer.handler
+      MemorySize: 512 # pushes each question and result to every player
+      Timeout: 120
+      # Each timer schedules the next one (question -> reveal -> question ...). Without this, Lambda's recursive-loop
+      # detection stops the chain after ~16 hops, i.e. in the middle of a game.
+      RecursiveLoop: Allow
+      LoggingConfig: { LogGroup: !Ref TimerLogGroup }
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2 # every step is idempotent, so a retry is safe
+        MaximumEventAgeInSeconds: 600 # throttled events wait in Lambda's queue (with backoff) this long
+```
+
+- **A fixed `FunctionName`** lets the other functions (and the timer itself) find it by name.
+- **`Timeout: 120`**, because the timer stays awake for a whole question, which can be 20 or 25 seconds plus the grace period.
+- **`RecursiveLoop: Allow`**, because the timer keeps scheduling itself, and Lambda's loop detection would otherwise stop it mid-game.
+- **`EventInvokeConfig`**: if a timer run fails, Lambda retries it twice; if Lambda is busy, the event waits in a queue for up to 10 minutes instead of being dropped.
+
+</Step>
+
+<Step number={10} title="Monitoring and email alerts">
+
+The template also builds its own monitoring. Every function logs one JSON object per line into a log group kept for 14 days. Custom game metrics (games started, answers submitted ...) use CloudWatch's <Term t="Embedded Metric Format">A specially shaped log line that CloudWatch turns into a real metric, with no extra API calls or permissions.</Term>, written by `lib/log.js`.
+
+There are 14 alarms. Here is one:
+
+```yaml title="aws/template.yaml"
+  LambdaThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-lambda-throttles'
+      AlarmDescription: Lambda throttled invocations in this account and region (concurrency quota reached)
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!GetAtt MonitorFunction.Arn] # emails you (handlers/monitor.js)
+```
+
+Notice the action: the alarm **invokes the monitor function**, which turns it into a readable email. The email goes out through an SNS topic, and the subscription only exists when you give an address:
+
+```yaml title="aws/template.yaml"
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Quibble alerts # the sender name in the inbox
+
+  AlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+```
+
+The monitor itself is started by two EventBridge rules: a schedule and a pattern on CloudFormation events.
+
+```yaml title="aws/template.yaml"
+      Events:
+        HealthCheck:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Description: Quibble uptime probes (website, /api/health, WebSocket)
+        DeployFailed:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.cloudformation]
+              detail-type: [CloudFormation Stack Status Change]
+              detail:
+                stack-id: [!Ref AWS::StackId]
+                status-details:
+                  status: [UPDATE_ROLLBACK_COMPLETE, UPDATE_ROLLBACK_FAILED, UPDATE_FAILED, ROLLBACK_COMPLETE, ROLLBACK_FAILED, DELETE_FAILED]
+```
+
+A few more pieces complete the picture: metric filters count `level: "error"` log lines (the handlers catch most errors, so Lambda's own `Errors` metric would miss them), a `quibble-monitor-errors` alarm emails through SNS directly in case the monitor itself breaks, and a CloudWatch dashboard shows games, answers, Lambda concurrency and throttles, DynamoDB throttles and recent errors.
+
+</Step>
+
+<Step number={11} title="Outputs">
+
+```yaml title="aws/template.yaml"
+Outputs:
+  WebsiteUrl:
+    Description: Share this link with players (HTTPS)
+    Value: !Sub 'https://${FrontendBucket.RegionalDomainName}/index.html'
+  WebsiteHttpUrl:
+    Description: The same site over plain HTTP (S3 website endpoint; browsers warn about it)
+    Value: !GetAtt FrontendBucket.WebsiteURL
+  HttpApiUrl:
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  WebSocketUrl:
+    Value: !Sub 'wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${WebSocketStageName}'
+```
+
+Outputs are values CloudFormation prints after a deploy. They are also how the scripts find things: `aws/scripts/stack.mjs` reads them with `DescribeStacks`, so `npm run publish` knows the bucket name and writes `HttpApiUrl` and `WebSocketUrl` into `config.js`. The full list also has the table names, `DashboardUrl`, `AlertsTopicArn` and `MonitorFunctionName`.
+
+</Step>
+
+## Part 4: Walk through the Lambda code
+
+Each handler is short. The real work lives in `aws/backend/src/lib/`, mostly in `game.js`.
+
+<Step number={12} title="ws-connect: who gets a socket">
+
+**Receives:** the `$connect` event, with the socket's `connectionId` and the `?token=` query string. **Returns:** `200` to accept the socket or `401` to refuse it.
+
+```javascript title="aws/backend/src/handlers/wsConnect.js"
+export const handler = async (event) => {
+  const claims = verifyToken(event.queryStringParameters?.token);
+  // Strongly consistent: the browser opens its socket right after signing up.
+  const user = claims && (await getUserById(claims.userId, { consistent: true }));
+  if (!user || user.banned || tokenRevoked(user, claims.sv)) return { statusCode: 401, body: 'unauthorized' };
+  // tokenIat lets `hello` hand out a fresh token before a long event outlives the old one; tokenSv lets every message
+  // check the socket's token wasn't signed out since.
+  await saveConnection(event.requestContext.connectionId, user.id, claims.iat, claims.sv);
+  log('info', 'socket connected', { userId: user.id, connectionId: event.requestContext.connectionId });
+  return { statusCode: 200, body: 'ok' };
+};
+```
+
+Step by step:
+
+1. `verifyToken` checks the <Term t="JWT">JSON Web Token: a small signed string that says who you are. The server can check the signature without a database lookup.</Term> signature with the secret, without touching the database. The token is in the URL because the browser's WebSocket API cannot add an `Authorization` header.
+2. It reads the user with a **strongly consistent** read. DynamoDB reads are normally "eventually consistent" and may miss a write from a moment ago; the player may have signed up one second earlier.
+3. Banned, deleted, or signed out by an admin ("sign out everywhere" bumps a `sessionVersion` that `tokenRevoked` compares): `401`, and API Gateway refuses the socket.
+4. Otherwise it saves a Connections item (with a 3-hour TTL, since API Gateway closes sockets after 2 hours anyway).
+
+</Step>
+
+<Step number={13} title="ws-message: one door for every game action">
+
+**Receives:** a `$default` event whose `body` is a frame like `{"action":"message","id":"9f2c41ab-4","event":"room:join","data":{"code":"K7M2QX"}}`. **Returns:** always `200` to API Gateway; the real reply is an **ack** pushed back to the socket.
+
+```javascript title="aws/backend/src/handlers/wsMessage.js"
+const actions = {
+  hello: game.hello,
+  sync: game.hello,
+  ping: () => ({ serverNow: Date.now() }),
+  'game:create': game.create,
+  'room:join': game.join,
+  'game:start': game.start,
+  'game:cancel': game.cancelByHost,
+  'room:leave': game.leave,
+  'answer:submit': game.submitAnswer,
+  react: game.react,
+};
+```
+
+For each frame it:
+
+1. Looks up the action (own properties only, so a frame cannot name `constructor` or `__proto__`).
+2. Reads the socket's Connections item and the user, both strongly consistent, on **every** message, so a ban applies instantly.
+3. Validates `data` against a schema (`lib/schemas.js`, using zod).
+4. Builds a context with the time the frame **reached API Gateway**:
+
+```javascript title="aws/backend/src/handlers/wsMessage.js"
+      // When API Gateway received this frame: answer deadlines and speed points use it, so a cold start or a
+      // throttled-and-resent message never costs the player.
+      now: Number(event.requestContext.requestTimeEpoch) || Date.now(),
+```
+
+5. Runs the action and pushes `{ type: 'ack', id, ok: true, ... }` back with the same `id`.
+6. Runs "deferred" work after the ack, such as closing a question early or asking for a lobby push, so the player is never kept waiting for it.
+
+Because the browser resends any frame that was not acknowledged, **every action must be <Term t="idempotent">Safe to repeat: doing it twice has the same effect as doing it once.</Term>**. Joining twice keeps one seat; answering twice keeps the first answer. If something temporary fails (throttling, a timeout), the ack says `retry: true` and the browser tries again after a short, random pause.
+
+</Step>
+
+<Step number={14} title="The game engine: state, answers and phase changes">
+
+`lib/game.js` is a state machine: `lobby`, then `question` and `reveal` for each question, then `ended`. Three rules keep it consistent without a server.
+
+**1. Hot paths never rewrite shared state.** A join is one atomic counter on the lobby gate plus one new member item. An answer is one new item plus one atomic update of the question's gate. See the code peek **"An answer is two conditional writes"** on the project page: a <Term t="conditional write">A DynamoDB write that only happens if a condition on the item is true, checked atomically by DynamoDB itself.</Term> stores the answer only if it does not exist yet, and another adds the seat to the gate only while the question is open.
+
+**2. Phase changes are transactions guarded by `version`.** Opening a question, showing its result and ending the game each happen in one DynamoDB transaction (several writes that all succeed or all fail), on the condition that the Games header still has the `version` this Lambda read. When several Lambdas try the same step, exactly one wins. See the code peek **"Exactly one Lambda wins a phase change"**.
+
+**3. Whoever wins a phase change starts the next timer first, then tells everyone.** Here is the end of `openQuestion`:
+
+```javascript title="aws/backend/src/lib/game.js"
+  if (!(await commit(items))) return false;
+
+  const h = { ...header, ...fields, version: header.version + 1 };
+  await scheduleOrLog({ kind: 'question', code, qIndex: k, dueAt: acceptUntil }); // before the push: a timer must exist
+  metric('QuestionsAsked');
+  await broadcast(h, await gd.queryMembers(code), 'question:show', () => V.questionShow(h, q, { k, endsAt, acceptUntil }, Date.now()));
+  return true;
+```
+
+If `commit` returns `false`, someone else already opened this question, and this Lambda quietly stops. Otherwise it schedules the timer before the push, so a question on screen always has a clock behind it. `broadcast` reads every member item's `conns` (the open socket ids) and pushes to all of them.
+
+Two smaller tricks keep a full room cheap. Lobby lists are pushed at most once every 500 ms (`BROADCAST_WINDOW_MS`), no matter how many people join in that window. Emoji reactions are counted on 4 shard items and pushed about once a second.
+
+</Step>
+
+<Step number={15} title="game-timer: a clock made of Lambdas">
+
+In a normal Node.js server you would write `setTimeout(closeQuestion, 15000)`. In Lambda that does not work: once a function returns, its environment can be frozen or thrown away, so the timer would never reliably fire. And the game cannot live in memory either, because the next event may run on a completely different copy of the function.
+
+Quibble's answer: when a phase begins, the winner **invokes the game-timer function asynchronously** with the deadline. "Asynchronously" (`InvocationType: 'Event'`) means Lambda puts the event in a queue and the caller moves on at once. The handler accepts five kinds of events:
+
+```javascript title="aws/backend/src/handlers/gameTimer.js"
+// GameTimer: invoked asynchronously (fire-and-forget) with one of
+//   {kind:'question', code, qIndex, dueAt}  pushes answer counts, then closes the question at its deadline
+//   {kind:'reveal',   code, qIndex, dueAt}  opens the next question (or ends the game) after the reveal pause
+//   {kind:'lobby',    code, due, dueAt}     pushes the batched lobby list
+//   {kind:'unstick',  code}                 moves an overdue game on (its timer was lost)
+// Every kind is idempotent, so Lambda's automatic retries, duplicates and late deliveries are harmless.
+```
+
+(The code also handles a fifth kind, `reactions`, for emoji.) The question timer stays awake for the whole question:
+
+```javascript title="aws/backend/src/lib/game.js"
+/** Lives for the whole question: pushes answer counts, then closes the question at its deadline. */
+async function questionTimer({ code, qIndex: k, dueAt }) {
+  let lastCount = 0;
+  // ...
+  while (Date.now() < dueAt) {
+    await sleep(Math.min(COUNT_POLL_MS, Math.max(0, dueAt - Date.now())));
+    if (Date.now() >= dueAt) break;
+    // Cheap eventually consistent poll; a miss is re-checked strongly (a lagging replica must not kill the closer).
+    const gate = (await gd.getGate(code, k, { consistent: false })) ?? (await gd.getGate(code, k));
+    if (!gate) return;
+    // ... (if someone else is already closing it, wait or take over)
+    if (gate.answered !== lastCount) {
+      // ...
+      lastCount = gate.answered;
+      await broadcast(header, members, 'answer:count', () => V.answerCount(header, k, gate.answered));
+    }
+  }
+  // The deadline: this timer is the guaranteed closer. If someone else claimed the close and is still working (or
+  // died), keep checking until the question is really closed; closeQuestion takes over once their claim is stale.
+  const giveUpAt = Date.now() + TAKEOVER_MS + 3000;
+  while (!(await closeQuestion(code, k)) && Date.now() < giveUpAt) {
+    if (!V.isQuestionAt(await gd.getHeader(code), k)) return;
+    await sleep(1000);
+  }
+}
+```
+
+So the chain for one question is: the question timer pushes live counts, then calls `closeQuestion` at the deadline. `closeQuestion` scores the answers, commits the `reveal` phase and schedules a **reveal** timer. The reveal timer sleeps 4 seconds and opens the next question, which schedules the next question timer. That is why the function calls itself, and why it needs `RecursiveLoop: Allow`.
+
+The deadline is `acceptUntil`, which is the visible end of the countdown plus `LateGraceMs`. An answer that reached API Gateway in that grace window still counts.
+
+**What if a timer gets lost?** Lambda retries failed async events twice. If one is lost for good, players' browsers notice: when a phase is 4 seconds overdue, each browser's watchdog starts sending `sync` (the same as `hello`). Once the game is clearly overdue (8 seconds past its deadline), the server schedules one `unstick` run under a 10-second lease, so 250 browsers cause only one.
+
+<Callout type="cost" title="The timer is billed while it sleeps">
+
+Lambda bills for the time a function runs, including time spent in `sleep`. A 15-second question keeps one 512 MB timer running for about 16.5 seconds. That is still tiny for a club game, but it is the price of not running a server.
+
+</Callout>
+
+<Quiz
+  question="Why doesn't ws-message just call setTimeout to close the question 15 seconds later?"
+  options={["setTimeout is not available in Node.js 22", "The Lambda environment can be frozen or discarded after it returns, so the timer may never fire", "DynamoDB does not allow writes from timers", "API Gateway blocks timers"]}
+  answer={1}
+  explanation="Lambda only guarantees your code runs while it is handling an event. That is why Quibble hands every deadline to a separate game-timer invocation."
+/>
+
+</Step>
+
+<Step number={16} title="ws-disconnect: cleaning up, best effort">
+
+**Receives:** the `$disconnect` event with the closed socket's `connectionId`. **Returns:** `200` (API Gateway ignores the answer).
+
+```javascript title="aws/backend/src/lib/game.js"
+/** $disconnect: forget the socket; if it was the member's last one they are now offline. */
+export async function disconnect(connectionId) {
+  const conn = await deleteConnectionRecord(connectionId);
+  if (!conn?.gameCode) return;
+  const r = await removeConn(conn.gameCode, conn.userId, connectionId);
+  if (r?.wentOffline) await onOffline(conn.gameCode, r.member);
+}
+```
+
+It deletes the Connections item, removes the socket from the member's `conns` set, and if that was the player's last tab, lowers the question gate's `expected` count, so a question can close early without waiting for someone who left. If that leaves everyone else answered, ws-disconnect may close the question itself, which is why it also has permission to push and to invoke the timer.
+
+Because `$disconnect` may never arrive, nothing depends on it. A push to a dead socket fails with `GoneException`, and the broadcaster cleans that socket up on the spot. Closing early always double-checks who is really connected. And the TTL on Connections removes leftovers after 3 hours.
+
+</Step>
+
+<Step number={17} title="api and monitor: the supporting cast">
+
+**api** (`handlers/http.js`) receives HTTP API events (payload format 2.0) and returns JSON. It is a list of `[method, path, handler]` routes:
+
+```javascript title="aws/backend/src/handlers/http.js"
+  // The monitor function calls this every minute: an answer means API Gateway, this Lambda and DynamoDB all work.
+  ['GET', '/api/health', async () => {
+    await admin.pingDatabase();
+    return { ok: true, db: 'ok' };
+  }],
+
+  ['POST', '/api/auth/register', async ({ event, body }) => {
+    const { email, username, password } = parse(registerSchema, body); // a typo doesn't use up the IP's sign-ups
+    await limitRegister(sourceIp(event));
+```
+
+Worth noticing: sign-ups are limited per IP (500 an hour, sized so a whole classroom behind one Wi-Fi can register at once), failed logins per IP and per account, and passwords are hashed with bcrypt. AWS throttling turns into a `503`, which the page's `net.js` retries with backoff, instead of a `500` it would show as a failure. `OPTIONS` requests (CORS preflight checks) get a quick `204`.
+
+**monitor** (`handlers/monitor.js`) looks at what woke it up:
+
+```javascript title="aws/backend/src/handlers/monitor.js"
+export const handler = async (event = {}) => {
+  if (event['detail-type'] === 'Scheduled Event') return healthCheck();
+  if (event.alarmData) return onAlarm(event);
+  if (event.source === 'aws.cloudformation') return onStackEvent(event);
+  if (event.action === 'test') return testEmail();
+  log('warn', 'monitor: unexpected event', { keys: Object.keys(event) });
+  return { ignored: true };
+};
+```
+
+The health check loads `index.html`, calls `/api/health`, and opens a WebSocket handshake without a token, which a healthy `$connect` refuses with `401`. It records a `HealthCheckFailed` metric of 0 or 1; two failed minutes out of three trip the `quibble-health-check` alarm, which sends a "Quibble is down" email, and another when it recovers.
+
+</Step>
+
+## Part 5: Get your account ready
+
+<Step number={18} title="Raise the Lambda concurrency quota">
+
+Lambda <Term t="concurrency">How many copies of your functions are running at the same moment. Each request being handled right now uses one.</Term> is limited per account and per Region, and the limit is shared by **every** function. The README notes that new accounts get only **10**; the standard value is 1,000. When 250 players answer at once, 250 copies of ws-message want to run together.
+
+With 10 slots nothing is lost: API Gateway refuses the extra frames and the page resends them with backoff. But phases show up seconds late, and answers sent in the final moments can miss the deadline. Check your value:
+
+<Command code={`npm run quota:lambda`} output={`Lambda concurrent executions in ap-south-1: 10 (AWS standard: 1000)
+
+Request the standard 1000 with:  npm run quota:lambda -- --request`} />
+
+If it is below 1,000, ask for the standard value. It is free:
+
+<Command code={`npm run quota:lambda -- --request`} output={`Lambda concurrent executions in ap-south-1: 10 (AWS standard: 1000)
+
+Requested 1000: PENDING request for 1000 (made 2026-11-21)
+AWS usually decides within a day. Check progress with:  npm run quota:lambda`} />
+
+The README says requests are usually approved within a day TODO(verify), and AWS emails the account owner. Request it **days before** an event. Your IAM user needs Service Quotas permissions and `lambda:GetAccountSettings` for this script; if it says "Not allowed", ask in the console instead:
+
+<ConsoleStep path="Service Quotas > AWS services > AWS Lambda > Concurrent executions > Request increase at account level">
+
+Make sure the Region at the top right is the one you deploy to. Enter `1000` and submit. TODO(verify)
+
+</ConsoleStep>
+
+Until it is approved, you can still deploy and play: in Step 21, add `LateGraceMs=5000` so answers that arrive late still count.
+
+<Callout type="info" title="Why the template reserves no concurrency">
+
+Lambda lets you reserve slots for one function. Quibble deliberately does not: a reservation carves slots out of the shared pool, and on a 10-slot account it is not possible at all.
+
+</Callout>
+
+</Step>
+
+<Step number={19} title="Run the preflight check">
+
+`npm run preflight` checks that your machine and account are ready: the SAM CLI version (1.123 or newer), working credentials and a Region, the Lambda quota (it wants 500 or more for a 250-player game), and whether any games are live on an existing stack.
+
+<Command code={`npm run preflight`} output={`Quibble preflight
+  [ok]   AWS SAM CLI 1.1xx.x
+  [ok]   AWS credentials: account 123456789012 (arn:aws:iam::123456789012:user/your-user)
+  [ok]   Region: ap-south-1
+  [FAIL] Lambda concurrency quota is 10. A 250-player game needs 500 or more (the AWS standard is 1000).
+         Ask AWS for the standard 1000 (free; usually approved within a day):
+         ...
+  [ok]   Stack "quibble" is not deployed yet (nothing live to disturb).
+
+Preflight failed: 1 problem(s) above.`} />
+
+A low quota is the only failure you can choose to accept. For a test game with a few friends it is fine:
+
+<Command code={`npm run preflight -- --allow-degraded`} />
+
+<Checkpoint>
+
+Every line is `[ok]` (or the quota line is a `[warn]` with `--allow-degraded`), and it ends with `Preflight passed`.
+
+</Checkpoint>
+
+</Step>
+
+## Part 6: Deploy
+
+<Step number={20} title="Choose your admin login (optional)">
+
+`npm run seed` (Step 23) creates an admin account. By default it is `admin@example.com` with a **generated** password, because your site will be public on the internet and a well-known password would be dangerous. To pick your own, create a `.env` file:
+
+<Command
+  windows={`Copy-Item .env.example .env`}
+  mac={`cp .env.example .env`}
+  linux={`cp .env.example .env`}
+/>
+
+Open `.env` and set `ADMIN_EMAIL`, `ADMIN_USERNAME` and an `ADMIN_PASSWORD` of **10 or more characters** (shorter ones, and the example value, are replaced by a generated password). `.env` is git-ignored, so it never ends up on GitHub.
+
+</Step>
+
+<Step number={21} title="Deploy with one command">
+
+If your quota is already 1,000:
+
+<Command code={`npm run deploy`} />
+
+If it is still low, raise the grace period too:
+
+<Command code={`npm run deploy -- LateGraceMs=5000`} />
+
+Here is what `aws/scripts/deploy.mjs` does, in order:
+
+1. Runs the preflight in warn-only mode (it never stops the deploy).
+2. Creates the JWT signing secret the first time: 48 random bytes, saved in `aws/.jwt-secret` (git-ignored). Later deploys reuse it, so redeploying does not log everybody out.
+3. Runs `sam build`, which installs `aws/backend`'s dependencies and prepares the function package.
+4. Runs `sam deploy --stack-name quibble --resolve-s3 --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --parameter-overrides JwtSecret=****` plus any `Name=value` you added. `--resolve-s3` lets SAM create and use its own bucket for uploads, and `CAPABILITY_IAM` is your permission for the stack to create IAM roles.
+5. Runs the frontend publisher: it writes a `config.js` with your `HttpApiUrl` and `WebSocketUrl`, uploads `public/` to the website bucket with the right content types, and removes files that no longer exist locally.
+
+You do not need `sam deploy --guided` or a `samconfig.toml`: the script passes everything. The first deploy takes a few minutes TODO(verify).
+
+<Checkpoint output={`Successfully created/updated stack - quibble in ap-south-1
+...
+  uploaded config.js
+  uploaded index.html
+  ...
+Frontend published. Share this link with players:
+  https://quibble-frontendbucket-abc123xyz.s3.ap-south-1.amazonaws.com/index.html
+  (plain HTTP, not recommended: http://quibble-frontendbucket-abc123xyz.s3-website...)
+
+First deploy? Run "npm run seed" to create the admin account and sample questions.`}>
+
+SAM prints a table of outputs, then the publisher prints your **HTTPS** `WebsiteUrl`. Copy it somewhere.
+
+</Checkpoint>
+
+Template parameters you pass after `--` **stay set** for later deploys until you change them. So after the quota is raised, go back to the default with `npm run deploy -- LateGraceMs=1500`. If you only change files in `public/`, `npm run publish` uploads the frontend without a full deploy.
+
+<Callout type="warning" title="PowerShell and the double dash">
+
+The script prints the exact `sam deploy` line it runs (with `JwtSecret=****`). Check that your `Name=value` appears in it. If PowerShell swallowed the `--`, run the same command with `npm.cmd` instead of `npm`. TODO(verify)
+
+</Callout>
+
+<Callout type="security" title="Keep aws/.jwt-secret safe">
+
+Anyone with this secret could sign login tokens for any user, including the admin. It is git-ignored; never commit it or paste it anywhere. If you delete it, the next deploy generates a new one and everyone has to log in again.
+
+</Callout>
+
+</Step>
+
+<Step number={22} title="If the deploy fails on the bucket policy">
+
+Skip this step if Step 21 worked.
+
+Many accounts have S3 **Block Public Access** switched on for the whole account. Then CloudFormation is not allowed to attach the public-read policy the website bucket needs, and the deploy fails on `FrontendBucketPolicy` with an access-denied error that mentions public policies TODO(verify). The fix from the README is to allow public bucket policies at account level:
+
+<ConsoleStep path="S3 > Block Public Access settings for this account > Edit">
+
+Untick **"Block public access to buckets and objects granted through new public bucket policies"** and save. Type `confirm` if asked. Leave the ACL settings ticked: Quibble does not use ACLs. TODO(verify)
+
+</ConsoleStep>
+
+If this was your **first** deploy, CloudFormation rolled everything back and the stack may be stuck in `ROLLBACK_COMPLETE`, which cannot be updated. Delete it first, then deploy again TODO(verify):
+
+<Command code={`sam delete --stack-name quibble
+npm run deploy`} />
+
+<Callout type="security" title="Is this safe?">
+
+This setting only allows bucket policies that make things public. Your other buckets stay exactly as they are, and they stay private unless you write a public policy for them yourself.
+
+</Callout>
+
+</Step>
+
+<Step number={23} title="Seed the admin account and questions">
+
+<Command code={`npm run seed`} output={`Created admin: admin@example.com
+  password: Xy7...generated...   <- generated; save it now (set ADMIN_PASSWORD in .env to choose your own)
+Added 155 new questions (0 already existed).`} />
+
+The seed script reads the table names from the stack outputs, creates the admin account (with a bcrypt-hashed password) and loads the sample questions in all five question types. **Save the password now**: it is printed once. Running the seed again is safe: it skips questions that already exist and never changes an existing admin's password.
+
+</Step>
+
+<Step number={24} title="Turn on email alerts (optional)">
+
+Give the stack your email address and time zone once:
+
+<Command code={`npm run deploy -- AlertEmail=you@example.com AlertTimeZone=Asia/Kolkata`} />
+
+AWS sends an email titled **"AWS Notification - Subscription Confirmation"**. Click **Confirm subscription**; until you do, nothing reaches you. Then send yourself a test:
+
+<Command code={`npm run alerts:test`} output={`Test alert sent. Subscribed addresses:
+  you@example.com (email): confirmed: the test email is on its way`} />
+
+From now on you get an email when the site goes down (and when it is back), when errors are logged, when Lambda or DynamoDB throttle, when a deploy fails, and when an admin does something sensitive, such as banning a player or resetting a password. Without `AlertEmail`, the alarms and probes still run, but nobody is emailed.
+
+</Step>
+
+## Part 7: Test it
+
+<Step number={25} title="Check the API and the database">
+
+List the stack outputs:
+
+<Command code={`aws cloudformation describe-stacks --stack-name quibble --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" --output table`} />
+
+Call the health route with your own `HttpApiUrl`. On Windows, type `curl.exe`, because `curl` in PowerShell is a different command:
+
+<Command
+  windows={`curl.exe https://abc123defg.execute-api.ap-south-1.amazonaws.com/api/health`}
+  mac={`curl https://abc123defg.execute-api.ap-south-1.amazonaws.com/api/health`}
+  linux={`curl https://abc123defg.execute-api.ap-south-1.amazonaws.com/api/health`}
+  output={`{"ok":true,"db":"ok"}`}
+/>
+
+<Checkpoint output={`{"ok":true,"db":"ok"}`}>
+
+This one answer proves the whole REST path works: API Gateway, the api Lambda and a real DynamoDB read. It is the same call the monitor makes every minute.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={26} title="Check that $connect guards the door">
+
+Now try to open a WebSocket **without** a login token. Take your `WebSocketUrl`, change `wss://` to `https://`, and send a handshake by hand:
+
+<Command
+  windows={`curl.exe -i --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" https://xyz987wvut.execute-api.ap-south-1.amazonaws.com/prod`}
+  mac={`curl -i --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" https://xyz987wvut.execute-api.ap-south-1.amazonaws.com/prod`}
+  linux={`curl -i --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" https://xyz987wvut.execute-api.ap-south-1.amazonaws.com/prod`}
+/>
+
+<Checkpoint output={`HTTP/1.1 401 Unauthorized
+...`}>
+
+A `401`: API Gateway ran ws-connect, which found no valid token and refused the socket. This is exactly the monitor's WebSocket probe. The exact status text may differ TODO(verify).
+
+</Checkpoint>
+
+Want the full automatic test? The end-to-end suite plays real games over WebSockets against your stack. It signs up test players and adds a "Load Test" question category to your live tables, and `QA_SKIP_FULL=1` skips the test that signs up about 250 accounts:
+
+<Command
+  windows={`$env:QA_API="https://abc123defg.execute-api.ap-south-1.amazonaws.com"; $env:QA_WS="wss://xyz987wvut.execute-api.ap-south-1.amazonaws.com/prod"; $env:ADMIN_PASSWORD="your-admin-password"; $env:QA_SKIP_FULL="1"; npm run test:e2e`}
+  mac={`QA_API=https://abc123defg.execute-api.ap-south-1.amazonaws.com QA_WS=wss://xyz987wvut.execute-api.ap-south-1.amazonaws.com/prod ADMIN_PASSWORD=your-admin-password QA_SKIP_FULL=1 npm run test:e2e`}
+  linux={`QA_API=https://abc123defg.execute-api.ap-south-1.amazonaws.com QA_WS=wss://xyz987wvut.execute-api.ap-south-1.amazonaws.com/prod ADMIN_PASSWORD=your-admin-password QA_SKIP_FULL=1 npm run test:e2e`}
+/>
+
+Set `ADMIN_EMAIL` the same way if you changed it in Step 20.
+
+</Step>
+
+## Part 8: Play it end to end
+
+<Step number={27} title="Host your first real game">
+
+1. On your laptop, open the **HTTPS** `WebsiteUrl` from Step 21 and log in with the admin account from Step 23 (or sign up a normal account: anyone can host).
+2. Pick a few categories, choose how many questions, and press **Create game**. Try **Big-screen mode** if a second screen is handy.
+3. On your phone, scan the QR code in the lobby (or open the join link, which looks like `.../play.html?code=K7M2QX`). Sign up and you land in the lobby.
+4. Press **Start game** on the laptop and answer on the phone.
+5. Mid-question, switch the phone to airplane mode for five seconds, then back. Watch it reconnect.
+
+<Checkpoint>
+
+- Your phone's name appears in the laptop's lobby within about a second (lobby updates are batched every 500 ms).
+- The question appears on both screens at the same time, and the "answered" count rises as you tap.
+- At the buzzer you see the right answer, the vote breakdown, the fastest player and the leaderboard.
+- After airplane mode, the phone shows "Reconnecting..." briefly and lands back in the same question.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={28} title="Look under the hood while you play">
+
+Open the `DashboardUrl` output in a browser tab during a game. You will see games and answers counted, Lambda concurrency for each function, and throttles (which should stay at 0).
+
+Then look at the raw game state:
+
+<ConsoleStep path="DynamoDB > Tables > (the table whose name contains GamePlayTable) > Explore table items">
+
+Look for items whose `pk` ends in `#Q` (a question gate with `answered`, `expected` and the `seats` set) and `#A#0` (the answers to the first question, one item per seat, each with its arrival time `at`). TODO(verify)
+
+</ConsoleStep>
+
+And search the logs from every function in one go:
+
+<ConsoleStep path="CloudWatch > Logs > Logs Insights">
+
+Select the log groups that start with `/quibble/quibble/` and run the README's query: `fields @timestamp, msg, error.message | filter level = "error" | sort @timestamp desc`. Remove the `filter` line to see everything, such as `socket connected`. TODO(verify)
+
+</ConsoleStep>
+
+</Step>
+
+## Part 9: Run it in your club meeting
+
+You have a working, monitored, 250-player quiz. Here is how to run a real event with it, based on the README's "Before an event" checklist.
+
+<Step number={29} title="A week before">
+
+- **Quota is 1,000.** Run `npm run quota:lambda`. If it is still 10, request it now with `npm run quota:lambda -- --request`; approval can take a while.
+- **SAM CLI is 1.123 or newer.** Run `sam --version`.
+- **Preflight passes.** Run `npm run preflight`. Use `-- --allow-degraded` only if you accept slower phases on a low quota.
+- **Latest version deployed.** Run `npm run deploy`, and add `-- LateGraceMs=5000` if the quota is still low.
+- **Email alerts on** (Step 24), so you hear about problems before the audience does.
+- **Your questions are ready.** Use the built-in bank, import questions in the admin console, or build your own quiz under **My quizzes** (players never see the answers).
+- **Rehearse** a short game with three or four friends on their own phones and mobile data.
+
+</Step>
+
+<Step number={30} title="On the day">
+
+- **Share the HTTPS link.** Put the `WebsiteUrl` (`https://...amazonaws.com/index.html`) on a slide, or let people scan the lobby's QR code (`.../play.html?code=K7M2QX`). Avoid the plain-HTTP address: browsers warn about it.
+- **Let people sign up first.** Open the link a few minutes early so everyone has an account before you start. The limits are sized for a classroom on one Wi-Fi: 500 sign-ups per IP address per hour and 200 failed logins per IP per 15 minutes.
+- **Open the lobby early.** A lobby stays open for 3 hours, so you can create the game before people arrive.
+- **Use Big-screen mode** on the projector: the laptop becomes the room's display (big question, timer, animated leaderboard) and phones become answer pads. If you want to play too, join from your phone.
+- **Keep the CloudWatch dashboard open** on a second tab: Lambda concurrency and throttles, DynamoDB throttles.
+- **No deploys while a game is running.** The preflight warns about live games for a reason.
+- **If something looks stuck,** wait a few seconds: phones resync by themselves. As a last resort, the admin console's **Live games** page can end any game for everyone.
+- **Afterwards**, the leaderboards (all time and this week) and each player's match history are already there.
+
+</Step>
+
+## Part 10: Challenges
+
+<Step number={31} title="Pick a challenge">
+
+Each of these is a real improvement, and several come straight from the README's "Known trade-offs".
+
+1. **Put [CloudFront](/services/cloudfront) in front of the bucket.** Get a custom domain and clean `/` URLs instead of `.../index.html`. Hint: you can then make the bucket private and let only CloudFront read it.
+2. **Move the JWT secret out of environment variables** into SSM Parameter Store or Secrets Manager, and read it once per Lambda container.
+3. **Keep leaderboards up to date with DynamoDB Streams** instead of scanning the Results table after every game.
+4. **Add a team mode.** Players join a team, and the result shows team totals. Decide first: which new partition keys do you need so that 250 answers still never hit one key?
+5. **Break it on purpose, locally.** Run `npm run dev` with `LOCAL_LAMBDA_CONCURRENCY=10 LOCAL_TRACK_CAPACITY=1`, then `npm run test:load -- --players 200 --questions 12 --spread 0 --drop 15`, and read `http://localhost:5050/__local/capacity` to see the busiest partition keys.
+6. **Add a question type.** Look at `lib/qtypes.js` (how answers are checked) and `lib/views.js` (what is sent before and after the reveal), and make sure the answer never leaks early.
+
+</Step>
+
+## Part 11: Clean up
+
+<Step number={32} title="Empty the bucket and delete the stack">
+
+CloudFormation cannot delete an S3 bucket that still has files in it, so empty the website bucket first, then delete the stack.
+
+<Cleanup>
+
+<Command
+  windows={`$bucket = aws cloudformation describe-stacks --stack-name quibble --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text
+aws s3 rm "s3://$bucket" --recursive
+sam delete --stack-name quibble`}
+  mac={`BUCKET=$(aws cloudformation describe-stacks --stack-name quibble --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+aws s3 rm "s3://$BUCKET" --recursive
+sam delete --stack-name quibble`}
+  linux={`BUCKET=$(aws cloudformation describe-stacks --stack-name quibble --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+aws s3 rm "s3://$BUCKET" --recursive
+sam delete --stack-name quibble`}
+/>
+
+`sam delete` asks you to confirm; answer `y` to its questions TODO(verify). It deletes everything the template created: the APIs, all six functions, all nine tables and their data, the log groups, alarms, dashboard, SNS topic and the empty bucket.
+
+</Cleanup>
+
+If you ran Quibble locally, remove the DynamoDB Local container too:
+
+<Command code={`docker rm -f quibble-dynamodb`} />
+
+</Step>
+
+<Step number={33} title="Confirm everything is gone">
+
+<ConsoleStep path="CloudFormation > Stacks">
+
+The `quibble` stack is no longer listed (or shows `DELETE_COMPLETE` if you filter for deleted stacks). If it shows `DELETE_FAILED`, open its **Events** tab: usually the website bucket was not empty. Empty it and run `sam delete` again.
+
+</ConsoleStep>
+
+<ConsoleStep path="S3 > Buckets">
+
+No bucket starting with `quibble-frontendbucket-` is left. You may see a bucket starting with `aws-sam-cli-managed-default`: that is SAM's own upload bucket, shared by all your SAM projects. It holds only deployment packages; delete it (and its `aws-sam-cli-managed-default` stack) only if you have no other SAM projects. TODO(verify)
+
+</ConsoleStep>
+
+<ConsoleStep path="CloudWatch > Logs > Log groups">
+
+No log groups starting with `/quibble/quibble/` remain.
+
+</ConsoleStep>
+
+The quota increase can stay: it costs nothing. Keep `aws/.jwt-secret` if you plan to deploy again (old login tokens keep working), or delete it.
+
+<Checkpoint>
+
+No `quibble` stack, no website bucket, no `/quibble/` log groups. Nothing from this project is running or billing you any more.
+
+</Checkpoint>
+
+</Step>

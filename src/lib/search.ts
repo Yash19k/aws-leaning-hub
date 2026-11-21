@@ -1,7 +1,8 @@
 /** Client-side search index across projects, services, setup guides, FAQ and troubleshooting. */
 import type Fuse from 'fuse.js';
-import { allProjects, faqItems, guides, projects, rawMdxLoaders, services, troubleshootingItems } from './content';
+import { allProjects, guides, projects, rawMdxLoaders, services } from './content';
 import { plain } from './markdown';
+import type { FaqItem, TroubleshootingItem } from './types';
 
 export type SearchKind = 'project' | 'node' | 'service' | 'guide' | 'step' | 'faq' | 'error' | 'page';
 
@@ -25,7 +26,7 @@ export const KIND_LABEL: Record<SearchKind, string> = {
   page: 'Page',
 };
 
-function staticEntries(): SearchEntry[] {
+function staticEntries(faqItems: FaqItem[], troubleshootingItems: TroubleshootingItem[]): SearchEntry[] {
   const out: SearchEntry[] = [];
   for (const p of projects) {
     out.push({
@@ -148,8 +149,13 @@ let fusePromise: Promise<Fuse<SearchEntry>> | null = null;
 export function loadSearchIndex(): Promise<Fuse<SearchEntry>> {
   if (!fusePromise) {
     fusePromise = (async () => {
-      const [{ default: FuseCtor }, extra] = await Promise.all([import('fuse.js'), mdxEntries()]);
-      return new FuseCtor([...staticEntries(), ...extra], {
+      const [{ default: FuseCtor }, extra, { faqItems }, { troubleshootingItems }] = await Promise.all([
+        import('fuse.js'),
+        mdxEntries(),
+        import('@/content/faq/faq'),
+        import('@/content/troubleshooting/troubleshooting'),
+      ]);
+      return new FuseCtor([...staticEntries(faqItems, troubleshootingItems), ...extra], {
         keys: [
           { name: 'title', weight: 3 },
           { name: 'subtitle', weight: 1 },

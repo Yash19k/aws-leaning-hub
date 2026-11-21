@@ -4,7 +4,7 @@ import { Award, BookOpen, CreditCard, GraduationCap, Search, ShieldCheck, X, typ
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { NextUp } from '@/components/project/NextUp';
 import { AccordionItem } from '@/components/ui/Accordion';
-import { faqItems } from '@/lib/content';
+import { faqItems } from '@/content/faq/faq';
 import { Markdown, plain } from '@/lib/markdown';
 import { usePageMeta } from '@/lib/meta';
 import type { FaqGroup } from '@/lib/types';

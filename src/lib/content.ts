@@ -5,10 +5,8 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
 import type { MDXProps } from 'mdx/types';
 import { comingSoon } from '@/content/coming-soon';
-import { faqItems } from '@/content/faq/faq';
 import { setupGuides } from '@/content/setup/guides';
 import { serviceMeta } from '@/content/services/services';
-import { troubleshootingItems } from '@/content/troubleshooting/troubleshooting';
 import type { Project, Service } from './types';
 
 const projectModules = import.meta.glob<{ default: Project }>('../content/projects/*/project.ts', {
@@ -50,7 +48,7 @@ export function getGuide(slug: string | undefined) {
   return guides.find((g) => g.slug === slug);
 }
 
-export { comingSoon, faqItems, troubleshootingItems };
+export { comingSoon };
 
 // ---------------------------------------------------------------- MDX
 

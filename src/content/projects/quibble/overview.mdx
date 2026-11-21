@@ -1,0 +1,38 @@
+Quibble is a live quiz game, like the ones you have played in a lecture hall or at a fest. One person hosts a game and gets a 6-character code. Everyone else joins from their phone, and the whole room races the same countdown. Right answers score more the faster you tap.
+
+It runs entirely on serverless AWS. There is no game server sitting in a data centre waiting for players. When nobody is playing, almost nothing runs and almost nothing is billed.
+
+## A quiz night at your club
+
+Picture your AWS club's Friday meetup. The organiser plugs a laptop into the projector, picks "Big-screen mode" and presses **Create game**. A code like `K7M2QX` and a QR code fill the wall.
+
+Sixty people pull out their phones. They scan the QR code, sign up in a few seconds and watch their names pop into the lobby. The organiser presses **Start game**.
+
+The first question appears on the wall and on every phone at the same moment. A 15-second countdown starts. Someone taps an answer in 2 seconds; someone else waits until the last moment. The wall shows "38 of 60 answered" ticking up live. At the buzzer, everyone sees the right answer, how the room voted, who was fastest and who climbed the leaderboard. Four seconds later, the next question.
+
+Halfway through, one student's phone drops off the Wi-Fi. When it reconnects a few seconds later, they land back in the same question, and the answer they tapped just before the drop still counts.
+
+## Who would use it
+
+- **Clubs and societies** running quiz nights, trivia breaks or AWS study sessions.
+- **Teachers and TAs** who want a quick check of understanding at the end of a class, with players' own quizzes ("My quizzes") instead of the built-in question bank.
+- **Fest and event teams** who need something that holds 250 players without anyone babysitting a server.
+- **You**, as a portfolio project that shows you can build real-time systems, not just forms that save to a database.
+
+## What is hard under the hood
+
+If you built [DropVault](/projects/dropvault), you have already met <ServiceChip slug="api-gateway" />, <ServiceChip slug="lambda" />, <ServiceChip slug="dynamodb" /> and <ServiceChip slug="s3" />. There, every action was one request and one response. Quibble is harder in four ways.
+
+**The server has to speak first.** A normal API only answers when the browser asks. A quiz needs the server to tell 250 phones "the question is closed" the instant it happens. Quibble uses an API Gateway <Term t="WebSocket">A connection that stays open after it is made, so either side can send a message at any time. Think of a phone call instead of a series of letters.</Term> API, so every phone keeps one connection open for the whole game.
+
+**Lambda forgets everything.** A Lambda function runs for one event and then stops. It cannot keep a game in memory, and it cannot set a timer that fires 15 seconds later. So all game state lives in DynamoDB, and a separate game-timer Lambda is started for every deadline.
+
+**Everyone acts at the same instant.** When 250 people answer within the same 100 milliseconds, 250 copies of a Lambda run at once and all try to write. Quibble designs its tables so those writes never fight over one item, and so that when several Lambdas try to end the same question, exactly one wins.
+
+**Connections break.** Phones switch from Wi-Fi to mobile data, tabs go to sleep, and AWS only tries its best to tell you a connection closed. Quibble numbers every message, resends anything that was not acknowledged, tags every update with a version number, and lets any phone ask for a fresh copy of the game if it thinks it missed something.
+
+<Callout type="tip" title="How to explore this page">
+
+Start with the live diagram below and play the flow **"A student answers and everyone sees the result update"**. It shows the whole real-time loop in nine steps. Then open the what-if cards to see how the design survives the messy cases.
+
+</Callout>

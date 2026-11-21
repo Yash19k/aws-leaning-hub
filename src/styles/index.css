@@ -76,6 +76,10 @@
     background-size: 22px 22px;
   }
 
+  .todo-verify {
+    @apply mx-0.5 inline-flex cursor-help items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 align-[0.1em] text-[0.65rem] font-bold uppercase leading-[1.1rem] tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

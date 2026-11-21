@@ -11,8 +11,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.ts\"",
-    "deploy:infra": "sam deploy --template-file infra/template.yaml --config-file infra/samconfig.toml",
-    "deploy:site": "tsx scripts/deploy-site.ts"
+    "deploy:infra": "cd infra && sam deploy",
+    "deploy:site": "tsx scripts/deploy-site.ts",
+    "og": "tsx scripts/generate-og.ts"
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.1.1",
@@ -45,6 +46,7 @@
     "globals": "^16.0.0",
     "postcss": "^8.5.3",
     "prettier": "^3.5.3",
+    "puppeteer-core": "^22.15.0",
     "remark-gfm": "^4.0.1",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.3",

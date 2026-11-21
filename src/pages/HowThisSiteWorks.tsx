@@ -11,6 +11,7 @@ import { Callout } from '@/components/ui/Callout';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { siteArchitecture } from '@/content/site/architecture';
+import { inline } from '@/lib/markdown';
 import { usePageMeta } from '@/lib/meta';
 import { SITE } from '@/lib/site';
 
@@ -28,7 +29,7 @@ const CARDS = [
   {
     icon: Coins,
     title: 'Why it costs almost nothing',
-    text: 'There is no server. You pay a little for storage, requests and data transfer, and a club-sized audience fits inside the Free Tier for CloudFront and S3. TODO(verify) current Free Tier amounts.',
+    text: 'There is no server. You pay a little for storage, requests and data transfer, and a club-sized audience fits inside the Free Tier for CloudFront and S3 TODO(verify).',
   },
 ];
 
@@ -69,7 +70,7 @@ export default function HowThisSiteWorks() {
                   <c.icon className="h-5 w-5" aria-hidden="true" />
                 </span>
                 <h3 className="mt-4 text-lg font-extrabold">{c.title}</h3>
-                <p className="mt-2 leading-relaxed text-muted">{c.text.replace(' TODO(verify) current Free Tier amounts.', '')}</p>
+                <p className="mt-2 leading-relaxed text-muted">{inline(c.text)}</p>
               </div>
             ))}
           </div>

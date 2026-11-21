@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Brain, Check, RotateCcw, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { inline } from '@/lib/markdown';
 import { recordQuiz } from '@/lib/progress';
 
 function hash(s: string): string {
@@ -69,7 +70,7 @@ export function Quiz({
               >
                 {isRight ? <Check className="h-4 w-4" /> : isWrongPick ? <X className="h-4 w-4" /> : String.fromCharCode(65 + i)}
               </span>
-              {o}
+              <span>{inline(o)}</span>
             </button>
           );
         })}
@@ -80,7 +81,7 @@ export function Quiz({
             <p className={cn('font-bold', correct ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300')}>
               {correct ? 'Correct!' : 'Not quite.'}
             </p>
-            {explanation && <p className="mt-1 text-[0.95rem] leading-relaxed text-ink/85">{explanation}</p>}
+            {explanation && <p className="mt-1 text-[0.95rem] leading-relaxed text-ink/85">{inline(explanation)}</p>}
             {!correct && (
               <button type="button" onClick={() => setPicked(null)} className="mt-3 inline-flex items-center gap-1.5 text-sm font-bold text-link">
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Try again

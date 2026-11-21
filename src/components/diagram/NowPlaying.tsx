@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { inline } from '@/lib/markdown';
 import { useDiagram } from './DiagramContext';
 
 /** Caption + mini controls shown under the diagram while a flow plays (phones and tablets). */
@@ -33,7 +34,7 @@ export function NowPlaying({ className }: { className?: string }) {
               <p className="truncate text-2xs font-bold uppercase tracking-wider text-muted">{flow.title}</p>
               <p className="font-bold leading-snug text-ink">{done ? 'Flow complete' : step.title}</p>
               <p className="mt-0.5 line-clamp-3 text-sm leading-snug text-ink/80">
-                {done ? 'Replay it, or pick another flow to watch.' : step.explanation}
+                {done ? 'Replay it, or pick another flow to watch.' : inline(step.explanation)}
               </p>
             </div>
             <button

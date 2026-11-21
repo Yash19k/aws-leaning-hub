@@ -6,12 +6,22 @@
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
-const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)\s]+\))/g;
+const INLINE = /(TODO\(verify\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)\s]+\))/g;
+
+/** Small pill shown wherever content still says TODO(verify). */
+export function VerifyPill() {
+  return (
+    <span className="todo-verify" title="Not checked yet: a human must confirm this against the AWS console or pricing page before launch.">
+      verify
+    </span>
+  );
+}
 
 export function inline(text: string): ReactNode[] {
   const parts = text.split(INLINE);
   return parts.map((part, i) => {
     if (!part) return null;
+    if (part === 'TODO(verify)') return <VerifyPill key={i} />;
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <code

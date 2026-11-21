@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, ChevronLeft, ChevronRight, Gauge, Pause, Play, RotateCcw, Route, Square } from 'lucide-react';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { cn } from '@/lib/cn';
+import { inline } from '@/lib/markdown';
 import { EMPTY_LIST, useProgress } from '@/lib/progress';
 import { useDiagram } from './DiagramContext';
 
@@ -175,7 +176,7 @@ export function FlowPlayer({ className }: { className?: string }) {
                   </p>
                   <p className="mt-1 text-[1.02rem] font-bold leading-snug">{done ? 'That is the whole journey' : step.title}</p>
                   <p className="mt-1 text-sm leading-relaxed text-ink/85">
-                    {done ? 'Replay it, slow it down, or click any step number to jump back.' : step.explanation}
+                    {done ? 'Replay it, slow it down, or click any step number to jump back.' : inline(step.explanation)}
                   </p>
                   {!done && step.payloadExample !== undefined && (
                     <div className="mt-3">

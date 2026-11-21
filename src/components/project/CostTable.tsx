@@ -1,20 +1,8 @@
-import { Badge } from '@/components/ui/Badge';
 import { inline } from '@/lib/markdown';
 import type { CostLine } from '@/lib/types';
 
 function Cell({ text }: { text: string }) {
-  const hasTodo = text.includes('TODO(verify)');
-  const clean = text.replace(/\s*TODO\(verify\)\s*/g, ' ').trim();
-  return (
-    <span>
-      {inline(clean)}
-      {hasTodo && (
-        <Badge tone="brand" className="ml-1.5 align-middle">
-          to verify
-        </Badge>
-      )}
-    </span>
-  );
+  return <span>{inline(text)}</span>;
 }
 
 export function CostTable({ lines }: { lines: CostLine[] }) {

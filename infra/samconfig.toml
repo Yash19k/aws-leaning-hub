@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "aws-learning-hub"
+
+[default.deploy.parameters]
+region = "ap-south-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
+# Change these if you fork the site, or if your account already has a GitHub OIDC provider:
+#   sam deploy --parameter-overrides GitHubRepo=<owner>/<repo> CreateGitHubOidcProvider=false ExistingGitHubOidcProviderArn=<arn>

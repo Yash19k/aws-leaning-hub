@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { CheckCircle2, CircleSlash } from 'lucide-react';
 import { AccordionItem } from '@/components/ui/Accordion';
 import { cn } from '@/lib/cn';
+import { inline } from '@/lib/markdown';
 
 /** Project FAQ entry: <FaqItem q="Question">Answer in markdown</FaqItem>. Wrap several in <FaqList>. */
 export function FaqItem({ q, children }: { q: string; children: ReactNode }) {
@@ -46,7 +47,7 @@ export function WhenToUse({ use, avoid }: { use: string[]; avoid: string[] }) {
           {use.map((u) => (
             <li key={u} className="flex gap-2">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-              {u}
+              <span>{inline(u)}</span>
             </li>
           ))}
         </ul>
@@ -59,7 +60,7 @@ export function WhenToUse({ use, avoid }: { use: string[]; avoid: string[] }) {
           {avoid.map((u) => (
             <li key={u} className="flex gap-2">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
-              {u}
+              <span>{inline(u)}</span>
             </li>
           ))}
         </ul>

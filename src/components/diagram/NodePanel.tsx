@@ -91,7 +91,7 @@ export function NodePanel() {
 
           {(role?.analogy || (!role && service)) && (
             <Section icon={<Lightbulb className="h-4 w-4" />} title="Think of it like">
-              <p>{role?.analogy ?? service?.analogy}</p>
+              <p>{inline(role?.analogy ?? service?.analogy ?? '')}</p>
             </Section>
           )}
 

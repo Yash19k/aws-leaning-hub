@@ -53,8 +53,43 @@ export function rehypeCodeMetaAndSlugs() {
   };
 }
 
+const TODO_RE = /TODO\(verify\)/g;
+const TODO_TITLE = 'Not checked yet: a human must confirm this against the AWS console or pricing page before launch.';
+
+/** Turns "TODO(verify)" in prose into a small "verify" pill (code blocks are left alone). */
+export function rehypeTodoVerify() {
+  return (tree: HastNode) => {
+    const walk = (node: HastNode) => {
+      if (node.type === 'element' && (node.tagName === 'code' || node.tagName === 'pre')) return;
+      if (!node.children) return;
+      const next: HastNode[] = [];
+      for (const child of node.children) {
+        if (child.type === 'text' && child.value && TODO_RE.test(child.value)) {
+          TODO_RE.lastIndex = 0;
+          child.value.split(TODO_RE).forEach((part, i) => {
+            if (i > 0) {
+              next.push({
+                type: 'element',
+                tagName: 'span',
+                properties: { className: ['todo-verify'], title: TODO_TITLE },
+                children: [{ type: 'text', value: 'verify' }],
+              });
+            }
+            if (part) next.push({ type: 'text', value: part });
+          });
+        } else {
+          walk(child);
+          next.push(child);
+        }
+      }
+      node.children = next;
+    };
+    walk(tree);
+  };
+}
+
 export const mdxOptions = {
   remarkPlugins: [remarkGfm],
-  rehypePlugins: [rehypeCodeMetaAndSlugs],
+  rehypePlugins: [rehypeCodeMetaAndSlugs, rehypeTodoVerify],
   providerImportSource: '@mdx-js/react',
 };

@@ -170,5 +170,79 @@ export const siteArchitecture: DiagramSource = {
       ],
     },
   ],
-  codePeeks: [],
+  codePeeks: [
+    {
+      id: 'rewrite-fn',
+      nodeId: 'urlfn',
+      title: 'The URL rewrite function',
+      language: 'javascript',
+      filePath: 'infra/template.yaml',
+      code: `function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+  if (uri.endsWith('/')) {
+    request.uri = uri + 'index.html';
+  } else if (uri.split('/').pop().indexOf('.') === -1) {
+    request.uri = uri + '/index.html';
+  }
+  return request;
+}`,
+      explanation:
+        'Runs at the edge before CloudFront looks in its cache. If the last part of the path has no dot (no file extension), it is a page, so the function points it at that page\'s pre-rendered `index.html`.',
+      highlightLines: [6, 7],
+    },
+    {
+      id: 'bucket-policy',
+      nodeId: 's3',
+      title: 'Only this distribution may read the bucket',
+      language: 'yaml',
+      filePath: 'infra/template.yaml',
+      code: `- Sid: AllowCloudFrontOacRead
+  Effect: Allow
+  Principal: { Service: cloudfront.amazonaws.com }
+  Action: s3:GetObject
+  Resource: !Sub '\${SiteBucket.Arn}/*'
+  Condition:
+    StringEquals:
+      AWS:SourceArn: !Sub 'arn:aws:cloudfront::\${AWS::AccountId}:distribution/\${Distribution}'`,
+      explanation:
+        'The bucket blocks all public access. This one statement lets the CloudFront service read objects, but only when the request comes from **this** distribution (the `AWS:SourceArn` condition). Nobody can list the bucket.',
+      highlightLines: [6, 7, 8],
+    },
+    {
+      id: 'spa-fallback',
+      nodeId: 'cloudfront',
+      title: 'Deep links: turn errors into the app',
+      language: 'yaml',
+      filePath: 'infra/template.yaml',
+      code: `CustomErrorResponses:
+  - ErrorCode: 403
+    ResponseCode: 200
+    ResponsePagePath: /index.html
+    ErrorCachingMinTTL: 10
+  - ErrorCode: 404
+    ResponseCode: 200
+    ResponsePagePath: /index.html
+    ErrorCachingMinTTL: 10`,
+      explanation:
+        'S3 says 403 for a key that does not exist (because nobody may list the bucket). CloudFront swaps that error for the app\'s `index.html` with a 200, and React Router then shows the right page, or the site\'s own 404 page.',
+      highlightLines: [2, 3, 4],
+    },
+    {
+      id: 'oidc-trust',
+      nodeId: 'iam',
+      title: 'Who may assume the deploy role',
+      language: 'yaml',
+      filePath: 'infra/template.yaml',
+      code: `Action: sts:AssumeRoleWithWebIdentity
+Condition:
+  StringEquals:
+    'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+  StringLike:
+    'token.actions.githubusercontent.com:sub': !Sub 'repo:\${GitHubRepo}:ref:refs/heads/\${GitHubBranch}'`,
+      explanation:
+        'GitHub signs a token describing the workflow run. IAM only hands out credentials if the token is meant for AWS (`aud`) and comes from this repository\'s main branch (`sub`). Forks and other branches are refused.',
+      highlightLines: [6],
+    },
+  ],
 };

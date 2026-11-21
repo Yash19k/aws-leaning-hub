@@ -106,7 +106,7 @@ export default function ProjectPage() {
                 <strong>
                   {project.freeTierFriendly.value ? 'Free Tier friendly. ' : 'Watch the cost. '}
                 </strong>
-                {inline(project.freeTierFriendly.note.replace(/\s*TODO\(verify\)/g, ''))}
+                {inline(project.freeTierFriendly.note)}
               </span>
             </p>
             <div className="mt-6 flex flex-wrap gap-3">

@@ -76,5 +76,5 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Publish to S3 and invalidate CloudFront
+      - name: Publish the site (Amplify, or S3 + CloudFront)
         run: npm run deploy:site

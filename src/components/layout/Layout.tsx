@@ -1,8 +1,6 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
 import { useBadgeWatcher } from '@/lib/badges';
-import { useReducedMotion } from '@/lib/hooks';
 import { Celebration } from './Celebration';
 import { Footer } from './Footer';
 import { Navbar } from './Navbar';
@@ -43,7 +41,6 @@ function useScrollManagement() {
 
 export function Layout() {
   const location = useLocation();
-  const reduced = useReducedMotion();
   const [searchOpen, setSearchOpen] = useState(false);
   useBadgeWatcher();
   useScrollManagement();
@@ -68,19 +65,13 @@ export function Layout() {
       <div className="flex min-h-dvh flex-col">
         <Navbar onSearch={() => setSearchOpen(true)} />
         <main id="main" className="flex-1">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={location.pathname}
-              initial={reduced ? false : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduced ? undefined : { opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <Suspense fallback={<PageLoader />}>
-                <Outlet />
-              </Suspense>
-            </motion.div>
-          </AnimatePresence>
+          {/* CSS fade-in on route change. (A framer-motion AnimatePresence here could leave the
+              new page stuck at opacity 0 when its lazy chunk was still loading.) */}
+          <div key={location.pathname} className="animate-page-in">
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
+          </div>
         </main>
         <Footer />
         <ScrollToTopButton />

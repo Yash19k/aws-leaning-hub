@@ -100,6 +100,10 @@ export default {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-6px)' },
         },
+        'page-in': {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'none' },
+        },
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
@@ -109,6 +113,7 @@ export default {
         'pulse-ring': 'pulse-ring 1.6s cubic-bezier(0.22, 1, 0.36, 1) infinite',
         float: 'float 5s ease-in-out infinite',
         shimmer: 'shimmer 2.4s linear infinite',
+        'page-in': 'page-in 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
       },
     },
   },

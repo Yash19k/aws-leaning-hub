@@ -22,7 +22,7 @@ export function ConsoleStep({
         In the AWS Console
       </div>
       <div className="px-4 py-4">
-        <ol className="flex flex-wrap items-center gap-1.5" aria-label="Click path">
+        <ol className="flex !list-none flex-wrap items-center gap-1.5 !space-y-0 !pl-0" aria-label="Click path">
           {parts.map((p, i) => (
             <Fragment key={i}>
               <li className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1 text-sm font-bold text-ink">

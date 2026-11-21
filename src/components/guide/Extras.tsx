@@ -43,7 +43,7 @@ export function WhenToUse({ use, avoid }: { use: string[]; avoid: string[] }) {
         <p className="mb-2 flex items-center gap-2 font-bold text-emerald-800 dark:text-emerald-200">
           <CheckCircle2 className="h-5 w-5" aria-hidden="true" /> Great for
         </p>
-        <ul className="space-y-1.5 text-[0.95rem] text-ink/85">
+        <ul className="!list-none !space-y-1.5 !pl-0 text-[0.95rem] text-ink/85">
           {use.map((u) => (
             <li key={u} className="flex gap-2">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
@@ -56,7 +56,7 @@ export function WhenToUse({ use, avoid }: { use: string[]; avoid: string[] }) {
         <p className="mb-2 flex items-center gap-2 font-bold text-muted">
           <CircleSlash className="h-5 w-5" aria-hidden="true" /> Reach for something else when
         </p>
-        <ul className="space-y-1.5 text-[0.95rem] text-ink/85">
+        <ul className="!list-none !space-y-1.5 !pl-0 text-[0.95rem] text-ink/85">
           {avoid.map((u) => (
             <li key={u} className="flex gap-2">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />

@@ -39,7 +39,7 @@ export function Step({ number, title, children }: { number: number; title: strin
         </motion.span>
         <div className="min-w-0 flex-1 pt-1">
           <p className="text-2xs font-bold uppercase tracking-wider text-muted">Step {number}</p>
-          <h3 className="text-xl font-bold leading-snug sm:text-[1.35rem]">{title}</h3>
+          <h3 className="!mt-0.5 !text-xl font-bold leading-snug sm:!text-[1.35rem]">{title}</h3>
         </div>
       </header>
       <div className="prose-hub max-w-none">{children}</div>

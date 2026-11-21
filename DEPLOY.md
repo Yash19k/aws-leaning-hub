@@ -12,6 +12,18 @@ Browser ──HTTPS──► CloudFront ──(OAC-signed GetObject)──► S3
 GitHub Actions ──OIDC──► IAM deploy role ──► s3 sync + cloudfront create-invalidation
 ```
 
+## Two hosting modes
+
+`infra/template.yaml` has a `HostingMode` parameter:
+
+| Mode | What it creates | When |
+| --- | --- | --- |
+| `amplify` (default) | An AWS Amplify Hosting app; `deploy:site` uploads `dist/` as a zip (manual deployment) | Works on any account. **The live site uses this** (`https://main.d1mth3xfrof3ju.amplifyapp.com`) |
+| `cloudfront` | Private S3 bucket + CloudFront + OAC + CloudFront Function (described below) | Once AWS Support has enabled CloudFront on the account |
+
+Switch with `cd infra && sam deploy --parameter-overrides HostingMode=cloudfront`, then `npm run deploy:site`
+(the script reads the stack outputs and picks the right upload path). The site URL changes, so update any shared links.
+
 ## Before you start
 
 - AWS CLI v2 configured (`aws sts get-caller-identity` works) and the AWS SAM CLI installed.

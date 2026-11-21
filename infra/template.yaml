@@ -1,11 +1,18 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  AWS Learning Hub - static site hosting. A private S3 bucket behind CloudFront
-  (Origin Access Control), a CloudFront Function for pre-rendered routes, SPA
-  fallback for client-side routes, and a least-privilege IAM role that GitHub
-  Actions assumes with OIDC (no long-lived access keys).
+  AWS Learning Hub - static site hosting, in one of two modes.
+  amplify (default): AWS Amplify Hosting, works on brand-new accounts.
+  cloudfront: a private S3 bucket behind CloudFront (Origin Access Control), a CloudFront
+  Function for pre-rendered routes and SPA fallback (new accounts need AWS Support to
+  enable CloudFront first). Both modes get a least-privilege IAM role that GitHub Actions
+  assumes with OIDC (no long-lived access keys).
 
 Parameters:
+  HostingMode:
+    Type: String
+    AllowedValues: [amplify, cloudfront]
+    Default: amplify
+    Description: amplify works everywhere; switch to cloudfront once AWS has enabled CloudFront on the account
   GitHubRepo:
     Type: String
     Default: Yash19k/aws-leaning-hub
@@ -28,11 +35,37 @@ Parameters:
 
 Conditions:
   CreateOidc: !Equals [!Ref CreateGitHubOidcProvider, 'true']
+  UseCloudFront: !Equals [!Ref HostingMode, cloudfront]
+  UseAmplify: !Equals [!Ref HostingMode, amplify]
 
 Resources:
+  # ================================================================ mode: amplify
+  # Amplify Hosting with manual deployments: scripts/deploy-site.ts uploads dist/ as a zip.
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Condition: UseAmplify
+    Properties:
+      Name: !Sub '${AWS::StackName}-web'
+      Platform: WEB
+      CustomRules:
+        # SPA routing: any path without a file extension serves the app shell.
+        - Source: '</^[^.]+$|\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|webp|xml)$)([^.]+$)/>'
+          Target: /index.html
+          Status: '200'
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Condition: UseAmplify
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: main
+      Stage: PRODUCTION
+
+  # ================================================================ mode: cloudfront
   # ---------------------------------------------------------------- S3: private storage for the built site
   SiteBucket:
     Type: AWS::S3::Bucket
+    Condition: UseCloudFront
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -50,6 +83,7 @@ Resources:
   # so a missing key returns 403, which CloudFront turns into the SPA's index.html.
   SiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
+    Condition: UseCloudFront
     Properties:
       Bucket: !Ref SiteBucket
       PolicyDocument:
@@ -64,9 +98,9 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
 
-  # ---------------------------------------------------------------- CloudFront
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
+    Condition: UseCloudFront
     Properties:
       OriginAccessControlConfig:
         Name: !Sub '${AWS::StackName}-oac'
@@ -79,6 +113,7 @@ Resources:
   # Paths with a file extension (/assets/index-3f9a.js) pass through unchanged.
   RewriteFunction:
     Type: AWS::CloudFront::Function
+    Condition: UseCloudFront
     Properties:
       Name: !Sub '${AWS::StackName}-rewrite'
       AutoPublish: true
@@ -99,6 +134,7 @@ Resources:
 
   Distribution:
     Type: AWS::CloudFront::Distribution
+    Condition: UseCloudFront
     Properties:
       DistributionConfig:
         Enabled: true
@@ -150,7 +186,7 @@ Resources:
         #   MinimumProtocolVersion: TLSv1.2_2021
         # 3. Point a CNAME (or Route 53 alias record) for the domain at the distribution's domain name.
 
-  # ---------------------------------------------------------------- GitHub Actions deploy role (OIDC)
+  # ================================================================ GitHub Actions deploy role (OIDC)
   GitHubOidcProvider:
     Type: AWS::IAM::OIDCProvider
     Condition: CreateOidc
@@ -163,7 +199,7 @@ Resources:
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: Assumed by GitHub Actions to publish the site (sync bucket + invalidate CloudFront)
+      Description: Assumed by GitHub Actions to publish the site
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -182,30 +218,56 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: ListSiteBucket
-                Effect: Allow
-                Action: s3:ListBucket
-                Resource: !GetAtt SiteBucket.Arn
-              - Sid: WriteSiteObjects
-                Effect: Allow
-                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
-                Resource: !Sub '${SiteBucket.Arn}/*'
-              - Sid: InvalidateCache
-                Effect: Allow
-                Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
-                Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
               - Sid: ReadStackOutputs
                 Effect: Allow
                 Action: cloudformation:DescribeStacks
                 Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+              - !If
+                - UseAmplify
+                - Sid: AmplifyManualDeploy
+                  Effect: Allow
+                  Action: [amplify:CreateDeployment, amplify:StartDeployment, amplify:GetJob]
+                  Resource: !Sub '${AmplifyApp.Arn}/branches/main*'
+                - !Ref AWS::NoValue
+              - !If
+                - UseCloudFront
+                - Sid: ListSiteBucket
+                  Effect: Allow
+                  Action: s3:ListBucket
+                  Resource: !GetAtt SiteBucket.Arn
+                - !Ref AWS::NoValue
+              - !If
+                - UseCloudFront
+                - Sid: WriteSiteObjects
+                  Effect: Allow
+                  Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                  Resource: !Sub '${SiteBucket.Arn}/*'
+                - !Ref AWS::NoValue
+              - !If
+                - UseCloudFront
+                - Sid: InvalidateCache
+                  Effect: Allow
+                  Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
+                  Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+                - !Ref AWS::NoValue
 
 Outputs:
+  HostingMode:
+    Value: !Ref HostingMode
   SiteUrl:
     Description: Open this in your browser
-    Value: !Sub 'https://${Distribution.DomainName}'
+    Value: !If
+      - UseCloudFront
+      - !Sub 'https://${Distribution.DomainName}'
+      - !Sub 'https://main.${AmplifyApp.DefaultDomain}'
+  AmplifyAppId:
+    Condition: UseAmplify
+    Value: !GetAtt AmplifyApp.AppId
   BucketName:
+    Condition: UseCloudFront
     Value: !Ref SiteBucket
   DistributionId:
+    Condition: UseCloudFront
     Value: !Ref Distribution
   DeployRoleArn:
     Description: Set this as the AWS_DEPLOY_ROLE_ARN variable in the GitHub repository

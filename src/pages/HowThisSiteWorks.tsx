@@ -54,6 +54,15 @@ export default function HowThisSiteWorks() {
           </div>
         </header>
 
+        <Callout type="info" title="Right now: AWS Amplify Hosting">
+          <p>
+            New AWS accounts have to ask AWS Support before they can create CloudFront distributions, and ours is still
+            waiting. Until then the live site is served by <a href="/services/amplify">Amplify Hosting</a>, which needs no
+            verification. The CloudFront design below is ready in the same template (<code>HostingMode=cloudfront</code>), and
+            switching is one deploy.
+          </p>
+        </Callout>
+
         <section id="architecture" className="scroll-mt-28">
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
             <ArchitectureDiagram title="Architecture of this website" />

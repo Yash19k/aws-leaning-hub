@@ -14,6 +14,8 @@ real serverless projects apart box by box. Built for the AWS Student Builder Gro
 Projects covered: **DropVault** (file sharing with expiring links, Terraform + Python) and **Quibble**
 (real-time multiplayer quiz over WebSockets, SAM + Node.js). GitHub Repo Analytics is listed as coming soon.
 
+**Live:** https://main.d1mth3xfrof3ju.amplifyapp.com (deployed from `main` by GitHub Actions).
+
 ## Run it
 
 ```bash

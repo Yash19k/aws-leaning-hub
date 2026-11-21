@@ -212,7 +212,10 @@ Resources:
               StringEquals:
                 'token.actions.githubusercontent.com:aud': sts.amazonaws.com
               StringLike:
-                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                # A job that uses a GitHub environment gets an "environment:<name>" subject instead of the branch ref.
+                'token.actions.githubusercontent.com:sub':
+                  - !Sub 'repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                  - !Sub 'repo:${GitHubRepo}:environment:production'
       Policies:
         - PolicyName: publish-site
           PolicyDocument:

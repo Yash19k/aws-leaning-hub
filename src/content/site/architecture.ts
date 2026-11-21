@@ -239,10 +239,12 @@ Condition:
   StringEquals:
     'token.actions.githubusercontent.com:aud': sts.amazonaws.com
   StringLike:
-    'token.actions.githubusercontent.com:sub': !Sub 'repo:\${GitHubRepo}:ref:refs/heads/\${GitHubBranch}'`,
+    'token.actions.githubusercontent.com:sub':
+      - !Sub 'repo:\${GitHubRepo}:ref:refs/heads/\${GitHubBranch}'
+      - !Sub 'repo:\${GitHubRepo}:environment:production'`,
       explanation:
-        'GitHub signs a token describing the workflow run. IAM only hands out credentials if the token is meant for AWS (`aud`) and comes from this repository\'s main branch (`sub`). Forks and other branches are refused.',
-      highlightLines: [6],
+        'GitHub signs a token describing the workflow run. IAM only hands out credentials if the token is meant for AWS (`aud`) and comes from this repository\'s main branch or its `production` environment (`sub`). Forks and other branches are refused. Gotcha: a job that uses a GitHub environment gets the `environment:` subject, not the branch one, which is why both are listed.',
+      highlightLines: [6, 7, 8],
     },
   ],
 };

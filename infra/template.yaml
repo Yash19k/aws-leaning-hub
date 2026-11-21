@@ -8,7 +8,7 @@ Description: >
 Parameters:
   GitHubRepo:
     Type: String
-    Default: Yash19k/aws-learning-hub
+    Default: Yash19k/aws-leaning-hub
     Description: owner/name of the GitHub repository allowed to deploy
   GitHubBranch:
     Type: String

@@ -3,7 +3,7 @@ import type { DiagramSource } from '../../components/diagram/DiagramContext';
 /** Architecture of this website itself (infra/template.yaml). Shown on /how-this-site-works. */
 export const siteArchitecture: DiagramSource = {
   slug: 'this-site',
-  githubUrl: 'https://github.com/Yash19k/aws-learning-hub',
+  githubUrl: 'https://github.com/Yash19k/aws-leaning-hub',
   githubBranch: 'main',
   services: [
     {

@@ -6,7 +6,7 @@ export const SITE = {
   clubName: 'AWS Student Builder Group',
   clubUrl: '',
   /** This site's own repository (linked from the footer and the "runs on AWS" page). */
-  repoUrl: 'https://github.com/Yash19k/aws-learning-hub',
+  repoUrl: 'https://github.com/Yash19k/aws-leaning-hub',
   description:
     'Learn AWS by exploring real serverless projects. Click any box in the architecture, watch requests flow, then build it yourself.',
   /** Region the guides recommend for students in India. */

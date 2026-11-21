@@ -1,0 +1,35 @@
+DropVault is a file-sharing app. You sign in, drop a file in, and get a link you can paste, a QR code someone can scan, or an email sent straight to their inbox. You decide how long the link works (15 minutes up to 7 days, or never) and, if you like, how many downloads it allows. You can turn a link off at any time, and see who downloaded what.
+
+## A story you have probably lived
+
+It's 11 pm before a lab exam. Your classmate Ravi missed the last session and asks for your notes. The PDF is 40 MB, and you don't really want it sitting in a group chat forever.
+
+So you open DropVault, upload `lab-notes.pdf`, and pick **1 day** and **3 downloads**. Ravi gets an email with a Download button. He grabs the notes, his roommate grabs a copy, and after the exam the link quietly stops working. If someone forwards it next semester, they get a polite "Link expired" page instead of your notes.
+
+<img src="/projects/dropvault/qr-dark.png" alt="The DropVault QR code popup in dark mode: a large QR code for Q3-financial-report.pdf with Close and Copy link buttons." />
+
+## Who would use it
+
+- **Students** sharing notes, recordings or project builds with a group, without making them public.
+- **Teachers and club leads** handing out one file to a room full of people: put the QR code on the projector.
+- **Anyone** sending something private (a signed form, an ID scan) who wants the link to die after one download.
+
+## What makes it interesting under the hood
+
+It is the beginner project on this site, but it is real software, and three ideas make it worth studying.
+
+**1. File bytes never pass through Lambda.** When you upload, a Lambda function only checks who you are and hands back a <Term t="presigned URL">A normal S3 address with a signature and an expiry time in it. Whoever holds it can do one thing (upload or download one file) until it expires, without any AWS keys.</Term>. Your browser then sends the file directly to S3. Files over 100 MB go up in parts, four at a time, and a dropped connection only costs the part in flight. Think of a hotel: reception (Lambda) gives you a key card for one room, but you carry your own luggage up in the lift.
+
+**2. Links are short codes, not S3 URLs.** A presigned S3 URL is about 1,500 characters long, too dense for a QR code to scan, and it stops working when the Lambda's temporary credentials expire, after a few hours at most. So DropVault saves a random 12-character code in DynamoDB and shares `.../v1/d/Xk2p9vQa7LmR` instead. Each time someone opens it, a Lambda checks the code and redirects them to a fresh S3 URL that lives only 5 minutes.
+
+**3. Two layers of expiry.** Every shared link has its own rules (expiry time, download limit, turned off or not), checked on every visit. Underneath, the S3 URL behind each visit expires after 5 minutes. Even if someone copies the final download address, it is useless almost straight away.
+
+<Callout type="info" title="And a little housekeeping magic">
+If you close the tab halfway through a big upload and never come back, DynamoDB's <Term t="TTL">Time to live: a timestamp on an item. After that time passes, DynamoDB deletes the item by itself.</Term> deletes the unfinished record after a day, and that deletion wakes a cleanup Lambda which throws away the parts already in S3. Nobody has to run a cleanup script.
+</Callout>
+
+## The services, in one breath
+
+<ServiceChip slug="api-gateway" /> is the front door, <ServiceChip slug="lambda" /> runs the code, <ServiceChip slug="s3" /> stores the files, <ServiceChip slug="dynamodb" /> remembers users, files and links, <ServiceChip slug="ses" /> sends share emails, and <ServiceChip slug="amplify" /> hosts the React web app. All of it is created by one Terraform command.
+
+The real code also has an admin panel, live health checks, email alerts and optional per-user encryption keys. Treat those as extra credit: the diagram marks them, and the build guide explains them, but you can understand the whole app without them.

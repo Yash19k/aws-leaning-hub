@@ -73,6 +73,8 @@ const projectSlugs = new Set(projects.map((p) => p.slug));
 // ------------------------------------------------------------------ routes (for link checks)
 function routeExists(raw: string): boolean {
   const url = raw.split(/[?#]/)[0].replace(/\/$/, '') || '/';
+  // A path with a file extension is a static file: it must exist in public/.
+  if (/\.[a-z0-9]{2,5}$/i.test(url)) return existsSync(path.join(ROOT, 'public', url));
   const fixed = ['/', '/projects', '/setup', '/services', '/faq', '/troubleshooting', '/progress', '/how-this-site-works', '/styleguide', '/404'];
   if (fixed.includes(url)) return true;
   let m = /^\/projects\/([^/]+)(\/build)?$/.exec(url);
@@ -81,7 +83,6 @@ function routeExists(raw: string): boolean {
   if (m) return guideSlugs.has(m[1]);
   m = /^\/services\/([^/]+)$/.exec(url);
   if (m) return serviceSlugs.has(m[1]);
-  if (/^\/(og|img|projects-media|favicon)/.test(url)) return existsSync(path.join(ROOT, 'public', url));
   return false;
 }
 
@@ -274,7 +275,11 @@ for (const file of walk(CONTENT)) {
     err(where, `MDX syntax error${m.line ? ` at ${m.line}:${m.column}` : ''}: ${m.message}`);
     continue;
   }
-  const codeless = src.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
+  // Ignore code: fenced blocks, template-literal props (code={`...`}) and inline code.
+  const codeless = src
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/=\{`(?:\\`|[^`])*`\}/g, '={``}')
+    .replace(/`[^`\n]*`/g, '');
   for (const m of codeless.matchAll(/<([A-Z][A-Za-z0-9]*)/g)) {
     if (!allowed.has(m[1])) err(where, `unknown component <${m[1]}> (available: ${MDX_COMPONENT_NAMES.join(', ')})`);
   }

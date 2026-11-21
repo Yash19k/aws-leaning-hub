@@ -165,7 +165,7 @@ function DiagramCanvas({ className, showNowPlaying = true, title }: Props) {
                   animate={{ opacity: 1 }}
                   className="truncate px-1 text-xs font-bold text-muted"
                 >
-                  {listView ? 'List view' : 'Tap a box · hover a line for its label'}
+                  {listView ? 'List view' : 'Tap a box for details'}
                 </motion.p>
               )}
             </AnimatePresence>

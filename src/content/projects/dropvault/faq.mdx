@@ -1,0 +1,80 @@
+<FaqList>
+  <FaqItem q="Do I need to know Terraform before I start?">
+
+No. The [build guide](/projects/dropvault/build) walks through every `.tf` file. The short version: Terraform reads the `.tf` files, works out which AWS resources should exist, compares that with what it created last time (saved in `terraform.tfstate`), and makes only the changes needed. [Install Terraform](/setup/install-terraform) first.
+
+  </FaqItem>
+  <FaqItem q="Why are my resources called enclave-dev-something, not dropvault?">
+
+The Terraform variable `app_name` defaults to `"enclave"` and `environment` to `"dev"`, and every AWS resource name starts with them (for example the Lambda `enclave-dev-create-upload` and the table `enclave-files-dev`). The name people see in the app and in emails is a separate variable, `display_name`, which defaults to `"DropVault"`. If you want different names, change `app_name` in `terraform.tfvars` before your first deploy.
+
+  </FaqItem>
+  <FaqItem q="Sharing by email says the address isn't verified. What's wrong?">
+
+Two things to check:
+
+- **The sender.** After the first deploy, AWS emails `sender_email` a verification link. Until you click it, SES won't send anything.
+- **The SES sandbox.** New AWS accounts start in the sandbox, where SES only sends **to** verified addresses too. Verify your friend's address with `aws ses verify-email-identity --email-address friend@example.com --region ap-south-1` (they must click the link AWS sends), or request production access in the SES console.
+
+Meanwhile, **Copy link** and **QR code** work for anyone, because they don't use email.
+
+  </FaqItem>
+  <FaqItem q="Can I build this on Windows?">
+
+Yes. Run `deploy.sh` from **Git Bash** (it comes with Git for Windows), and set these two lines in `terraform.tfvars`:
+
+```hcl
+bash_bin   = "C:/Program Files/Git/bin/bash.exe"
+python_bin = "python"
+```
+
+During `terraform apply`, Terraform runs `build.sh` with bash to build a Python dependency layer, so it needs to know where bash and Python are. The defaults (`/bin/bash`, `python3`) only exist on macOS and Linux.
+
+  </FaqItem>
+  <FaqItem q="Why is the web app on Amplify and not S3 + CloudFront?">
+
+Brand-new AWS accounts can't create CloudFront distributions until AWS Support has verified the account. Amplify Hosting works on day one, so `web_hosting = "amplify"` is the default. Once your account is verified you can switch to `"cloudfront"` and run `bash deploy.sh` again.
+
+  </FaqItem>
+  <FaqItem q="Are my files private and encrypted?">
+
+Yes. The bucket blocks all public access and refuses any request that isn't HTTPS. Files are encrypted at rest with SSE-S3 by default (free), or with KMS keys if you set `kms_mode` to `shared` or `per_user`. Nobody can reach a file without a presigned URL: those last 5 minutes for shared links and 1 hour for your own downloads. The one thing to be careful with is a link set to **never** expire: anyone who has it can download until you turn it off or delete the file.
+
+  </FaqItem>
+  <FaqItem q="What happens if I run deploy.sh again?">
+
+Nothing bad. Terraform compares your files with what already exists and changes only the differences (often nothing at all), then the script rebuilds and republishes the web app. Run it after every change you make.
+
+  </FaqItem>
+  <FaqItem q="Why is the first request after a while slow?">
+
+Two reasons. A Lambda function that hasn't run for a while needs a moment to start a fresh copy (a **cold start**). And sign-in is slow on purpose: passwords are hashed with PBKDF2 for 200,000 rounds, which makes stolen hashes expensive to crack. The auth function gets 1024 MB of memory because Lambda gives more CPU along with more memory, which makes that hashing faster.
+
+  </FaqItem>
+  <FaqItem q="How do I open the admin panel?">
+
+The admin panel is extra credit. Put your email (lowercase) in `admin_emails` in `terraform.tfvars`, run `bash deploy.sh`, then sign up or sign in with that address. **Admin** appears in the sidebar, and `terraform output admin_url` prints the link. Owner admins listed there can't be demoted, suspended or deleted from the panel, so you can never lock yourself out.
+
+  </FaqItem>
+  <FaqItem q="Can I try DropVault without an AWS account?">
+
+Yes. The repo has an offline mode: LocalStack (in Docker) pretends to be S3, DynamoDB, KMS and SES, and a small local server runs the real Lambda handlers. You need Docker Desktop, Python 3 and Node 20+. On Windows run `powershell -ExecutionPolicy Bypass -File local\start.ps1` from the repo folder, then open `http://localhost:3001`. On macOS or Linux, use the "by hand" commands in `local/README.md`. Emails are captured instead of sent. (Abandoned-upload cleanup doesn't run offline, because it needs DynamoDB Streams.)
+
+  </FaqItem>
+  <FaqItem q="Something returned 500. How do I see what went wrong?">
+
+Every function writes its logs to CloudWatch, kept for 14 days. The quickest way is the AWS CLI, for example the links function:
+
+```bash
+aws logs tail /aws/lambda/enclave-dev-qr --since 15m --region ap-south-1
+```
+
+The other log groups are named the same way: `enclave-dev-create-upload`, `enclave-dev-complete`, `enclave-dev-share`, `enclave-dev-auth`, `enclave-dev-authorizer` and so on. Also check the [troubleshooting page](/troubleshooting).
+
+  </FaqItem>
+  <FaqItem q="How much will this cost me?">
+
+For a class demo, very little: the README estimates about $0 to $1 a month TODO(verify). Most services charge per request and have free allowances. The steady cost is the 13 CloudWatch alarms (about $0.10 each beyond the free 10 TODO(verify)). Set a [billing alarm](/setup/billing-alarm) before you deploy, and run `terraform destroy` when you are done.
+
+  </FaqItem>
+</FaqList>

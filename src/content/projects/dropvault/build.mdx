@@ -1,0 +1,949 @@
+## Before you start
+
+You will deploy the real DropVault, exactly as it runs at the live demo: an API, twelve Lambda functions, two DynamoDB tables, a private S3 bucket, an SES sender and a hosted React app. One script creates all of it, and one command deletes it again at the end.
+
+Work through these setup guides first. Each one takes 10 to 20 minutes.
+
+<Prerequisite slug="create-aws-account" />
+<Prerequisite slug="secure-your-account" />
+<Prerequisite slug="billing-alarm" />
+<Prerequisite slug="iam-user-and-keys" />
+<Prerequisite slug="install-tools" />
+<Prerequisite slug="configure-aws-cli" />
+<Prerequisite slug="install-terraform" />
+
+By the end of those you should have:
+
+- **Terraform 1.5 or newer** (the code says `required_version = ">= 1.5"`).
+- **The AWS CLI v2** with working credentials (`aws configure`).
+- **Python 3** with pip. Terraform uses it to build one dependency layer.
+- **Node.js 20 or newer** with npm, to build the web app.
+- **bash.** macOS and Linux have it. On Windows, use **Git Bash**, which comes with Git for Windows.
+- **Git** and **curl** (Git Bash includes curl on Windows).
+
+<Callout type="cost" title="What this costs">
+
+At class-demo scale the README estimates about **$0 to $1 a month** TODO(verify). Almost everything is pay-per-request. The one steady cost is 13 CloudWatch alarms, about $0.10 each beyond the free 10 TODO(verify). Make sure your billing alarm is set, and do the cleanup step at the end when you are finished.
+
+</Callout>
+
+<Callout type="tip" title="Want to try it before touching AWS?">
+
+The repo has a fully offline mode. LocalStack (running in Docker) pretends to be S3, DynamoDB, KMS and SES, and a small local server runs the real Lambda handlers. You need Docker Desktop, Python 3 (`pip install boto3 jsonschema`) and Node 20+. From the repo folder on Windows run `powershell -ExecutionPolicy Bypass -File local\start.ps1`, then open `http://localhost:3001`. On macOS or Linux, follow the "by hand" commands in `local/README.md` (start LocalStack with Docker Compose, run `local/server.py`, then the web app). Emails are captured, not sent: read them at `http://localhost:4566/_aws/ses`. Abandoned-upload cleanup is the one thing that doesn't run offline.
+
+</Callout>
+
+## Part 1: Get the code
+
+<Step number={1} title="Check your tools">
+
+Run these in a terminal. On Windows use PowerShell for this step.
+
+<Command
+  windows={`terraform -version
+aws --version
+aws sts get-caller-identity
+python --version
+node --version
+& "C:/Program Files/Git/bin/bash.exe" --version`}
+  mac={`terraform -version
+aws --version
+aws sts get-caller-identity
+python3 --version
+node --version
+bash --version`}
+  linux={`terraform -version
+aws --version
+aws sts get-caller-identity
+python3 --version
+node --version
+bash --version`}
+/>
+
+<Checkpoint output={`Terraform v1.x.x          (1.5 or newer)
+aws-cli/2.x.x ...
+{
+    "UserId": "AIDA...",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/your-user"
+}
+Python 3.x.x
+v20.x.x                    (or newer)
+GNU bash, version 5.x ...`}>
+
+Every command prints a version, and `aws sts get-caller-identity` shows your account number. If it says `Unable to locate credentials`, go back to [Connect the AWS CLI](/setup/configure-aws-cli) or see [troubleshooting](/troubleshooting#unable-to-locate-credentials).
+
+</Checkpoint>
+
+If Git Bash is installed somewhere else on Windows, note its real path: you will need it in Step 16.
+
+</Step>
+
+<Step number={2} title="Clone the repo and take a tour">
+
+<Command code={`git clone https://github.com/Yash19k/dropvault.git
+cd dropvault`} />
+
+Here is what is inside, trimmed to what matters for this guide:
+
+```text
+dropvault/
+├── endpoints/                 one folder per Lambda function (Python 3.13)
+│   ├── common/python/         shared code, deployed as a Lambda layer
+│   ├── auth-service/          sign-up, sign-in, refresh, sign-out
+│   ├── authorizer/            checks the token in front of every file route
+│   ├── upload-file/           start an upload + presigned part URLs
+│   ├── complete-upload/       finish an upload, count it, mark it READY
+│   ├── get-user-files/        list your files and storage use
+│   ├── download-file/         presigned GET for your own file
+│   ├── delete-user-file/      delete a file, its record and its links
+│   ├── share-file/            email one short link per recipient (SES)
+│   ├── qr-link/               short links: create, list, turn off, /d/{code}
+│   ├── cleanup/               remove abandoned uploads (DynamoDB stream)
+│   └── admin/                 extra credit: admin API, health checks, monitor
+├── terraform/                 all the AWS infrastructure + deploy.sh
+├── web/                       React 19 + Vite + Tailwind CSS 4 app
+├── local/                     the offline LocalStack setup
+├── tests/                     pytest suite against a mocked AWS (moto)
+└── postman/                   ready-made API requests
+```
+
+Each Lambda lives in its own folder with a `src/` directory, so Terraform can zip each one separately. Code that several functions need (reading the request, talking to S3 and DynamoDB, links, quotas) lives once in `endpoints/common/python` and is shipped as a <Term t="Lambda layer">A zip of shared code or libraries that Lambda unpacks next to your function code, so many functions can use it without copying it.</Term>.
+
+</Step>
+
+## Part 2: The infrastructure, file by file
+
+Everything in AWS is described in the `terraform/` folder. You won't type any of this, but reading it is the best way to understand what you are about to create.
+
+<Step number={3} title="How the Terraform is organised">
+
+Terraform is <Term t="infrastructure as code">Describing your servers, databases and permissions in text files, so a tool can create them the same way every time, and you can review changes like code.</Term>. You write *what should exist*; Terraform works out *what to create, change or delete* to get there.
+
+Three ideas carry you through every file:
+
+- A **provider** is a plugin that talks to one platform. `versions.tf` asks for the AWS provider (plus small helpers: `random` for a secret, `archive` to zip code, `null` to run a script).
+- A **resource** block is one thing to create, like `resource "aws_s3_bucket" "files"`. The first label is the type, the second is a name you use to refer to it elsewhere (`aws_s3_bucket.files.arn`).
+- The **state file** (`terraform.tfstate`) is Terraform's memory of what it created. Never delete it while the resources exist, or Terraform forgets they are there.
+
+```hcl title="terraform/versions.tf"
+terraform {
+  required_version = ">= 1.5"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    ...
+  }
+  # Local state by default. To use a remote S3 backend, add a backend "s3" block.
+}
+
+provider "aws" {
+  region  = var.aws_region
+  profile = var.aws_profile != "" ? var.aws_profile : null
+}
+```
+
+`variables.tf` declares every setting (`aws_region`, `sender_email`, `web_hosting`...) with a default where it makes sense. You will fill them in a file called `terraform.tfvars` in Step 16.
+
+`locals.tf` builds the names everything shares. Notice the prefix: it is `app_name` + `environment`, which default to `enclave` and `dev`. That is why your AWS resources will be called `enclave-dev-...` even though the app shows the name DropVault (a separate setting, `display_name`).
+
+```hcl title="terraform/locals.tf" {3}
+locals {
+  account_id        = data.aws_caller_identity.current.account_id
+  prefix            = "${var.app_name}-${var.environment}"
+  table_name        = var.table_name != "" ? var.table_name : "${var.app_name}-files-${var.environment}"
+  files_bucket_name = var.files_bucket_name != "" ? var.files_bucket_name : "${local.prefix}-files-${local.account_id}"
+
+  functions = {
+    create-upload = { dir = "upload-file", module = "upload_file", layers = ["jsonschema"] }
+    complete      = { dir = "complete-upload", module = "complete_upload", layers = [] }
+    download      = { dir = "download-file", module = "download_file", layers = [] }
+    list          = { dir = "get-user-files", module = "get_user_files", layers = [] }
+    delete        = { dir = "delete-user-file", module = "delete_user_file", layers = [] }
+    share         = { dir = "share-file", module = "share_file", layers = ["jsonschema"] }
+    cleanup       = { dir = "cleanup", module = "cleanup", layers = [] }
+  }
+  ...
+}
+```
+
+The bucket name ends with your account ID because S3 bucket names must be unique across all of AWS. The `functions` map is a list of seven Lambdas that are built the same way; Step 5 shows how one resource block creates all seven.
+
+</Step>
+
+<Step number={4} title="Storage: s3.tf and dynamodb.tf">
+
+**The files bucket (`s3.tf`)** is locked down in four ways: a public access block (nothing can ever be made public), owner-enforced object ownership, default encryption, and a bucket policy that refuses anything not sent over HTTPS. Two rules make it usable:
+
+```hcl title="terraform/s3.tf"
+resource "aws_s3_bucket_lifecycle_configuration" "files" {
+  bucket = aws_s3_bucket.files.id
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload { days_after_initiation = 1 }
+  }
+}
+
+resource "aws_s3_bucket_cors_configuration" "files" {
+  bucket = aws_s3_bucket.files.id
+  cors_rule {
+    allowed_methods = ["PUT", "GET"]
+    allowed_origins = concat([local.web_url], var.allowed_origins)
+    allowed_headers = ["*"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+```
+
+- The **lifecycle rule** throws away parts of big uploads that were never finished, after a day. Those parts are invisible in the bucket but still billed.
+- **CORS** (<Term t="CORS">Cross-Origin Resource Sharing: a browser safety rule. JavaScript on one website may only call another address if that address says the website is allowed.</Term>) lets JavaScript on your web app's address PUT and GET files here. Without it the browser would block the upload before it starts. The bucket is still private: each request also needs a valid presigned URL.
+
+The bucket also has `force_destroy = true`, so `terraform destroy` can delete it even when it still holds files.
+
+**The files table (`dynamodb.tf`)** is one DynamoDB table with the key `file_id`, billed per request (`PAY_PER_REQUEST`). It holds several kinds of item side by side: a file uses its UUID as the key, a short link uses `QR#<code>`, a storage counter uses `USAGE#<user_id>`.
+
+```hcl title="terraform/dynamodb.tf"
+  global_secondary_index {
+    name            = "user-files"
+    hash_key        = "user_id"
+    range_key       = "uploaded_at"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "file-links"
+    hash_key        = "target_file_id"
+    range_key       = "created_at"
+    projection_type = "ALL"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  stream_enabled   = true
+  stream_view_type = "OLD_IMAGE"
+```
+
+- A <Term t="global secondary index">A second way to look items up in a DynamoDB table, by a different attribute than the main key. DynamoDB keeps it up to date for you.</Term> lets you query by something other than `file_id`. `user-files` answers "all of Asha's files, newest first". It is **sparse**: only file items have a `user_id`, so links and counters never appear in it. `file-links` answers "all links to this file" the same way.
+- **TTL** deletes any item whose `ttl` timestamp has passed. Unfinished uploads and expired links use it.
+- The **stream** is a log of every change to the table. `OLD_IMAGE` means each deletion carries a copy of the deleted item, which the cleanup Lambda needs to know what to remove from S3.
+
+The second table, `users` (in `auth.tf`), is simpler: one item per account, keyed by email.
+
+</Step>
+
+<Step number={5} title="The functions: lambda.tf and layers.tf">
+
+One resource block creates all seven Lambdas from the `functions` map, using `for_each`:
+
+```hcl title="terraform/lambda.tf"
+data "archive_file" "fn" {
+  for_each    = local.functions
+  type        = "zip"
+  source_dir  = "${path.module}/../endpoints/${each.value.dir}/src"
+  output_path = "${path.module}/build/functions/${each.key}.zip"
+  excludes    = ["**/__pycache__/**"]
+}
+
+resource "aws_lambda_function" "fn" {
+  for_each = local.functions
+
+  function_name    = "${local.prefix}-${each.key}"
+  filename         = data.archive_file.fn[each.key].output_path
+  source_code_hash = data.archive_file.fn[each.key].output_base64sha256
+  handler          = "${each.value.module}.lambda_handler"
+  runtime          = var.lambda_runtime
+  role             = aws_iam_role.lambda.arn
+  timeout          = 30
+  memory_size      = 256
+  ...
+}
+```
+
+`archive_file` zips each function's `src/` folder. `source_code_hash` is a fingerprint of that zip: when the code changes, the fingerprint changes and Terraform uploads the new version. Every function also gets a CloudWatch log group that keeps logs for 14 days. The auth, authorizer and links functions are defined the same way in their own files.
+
+**Layers.** Shared code is zipped straight from `endpoints/common`. The `jsonschema` library is different: it contains compiled parts, so it must be the Linux version, even if you deploy from Windows or a Mac. Terraform can't run pip, so a `null_resource` runs `build.sh` during `terraform apply`:
+
+```hcl title="terraform/layers.tf"
+resource "null_resource" "layers_build" {
+  ...
+  provisioner "local-exec" {
+    interpreter = [var.bash_bin, "-c"]
+    command     = "PYTHON='${var.python_bin}' PY_VERSION='${replace(var.lambda_runtime, "python", "")}' bash '${path.module}/build.sh'"
+  }
+}
+```
+
+`build.sh` asks pip for `manylinux2014_x86_64` wheels for Python 3.13, which is what runs on Lambda. This is the reason for the two Windows settings you will add in Step 16: Terraform needs to know where bash (`bash_bin`) and Python (`python_bin`) are.
+
+</Step>
+
+<Step number={6} title="The front door: API Gateway and the authorizer">
+
+**`apigateway.tf`** creates a REST API and its URL tree: `/v1/users/{user_id}/files/{file_id}/complete`, `/download`, `/share`, `/parts`. Each route is wired up by a small reusable module, `modules/api-lambda-route`, which creates three things: the method (like `POST`), the integration (call this Lambda) and a permission that lets API Gateway invoke the function.
+
+```hcl title="terraform/modules/api-lambda-route/main.tf"
+resource "aws_api_gateway_method" "this" {
+  rest_api_id      = var.rest_api_id
+  resource_id      = var.resource_id
+  http_method      = var.http_method
+  authorization    = var.authorizer_id == null ? "NONE" : "CUSTOM"
+  authorizer_id    = var.authorizer_id
+  api_key_required = false
+}
+
+resource "aws_api_gateway_integration" "this" {
+  ...
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.lambda_invoke_arn
+}
+```
+
+`AWS_PROXY` means a **Lambda proxy integration**: API Gateway hands the whole HTTP request to the function as one `event`, and sends back whatever status, headers and body the function returns. Routes passed an `authorizer_id` are protected; the rest (sign-up, sign-in and the public `/v1/d/{code}`) are open.
+
+A second module, `modules/cors-options`, answers the browser's `OPTIONS` "preflight" request on every route the web app calls. Browsers send one before any request that carries an `Authorization` header.
+
+The file ends with the stage (`dev`) and stage-wide throttling: 50 requests a second with bursts of 100. Anything over gets `429 Too Many Requests`, which caps password guessing and runaway costs.
+
+**`authorizer.tf`** puts a <Term t="Lambda authorizer">A small Lambda that API Gateway runs before your route. It looks at the request (here, the token) and answers allow or deny. API Gateway can cache the answer.</Term> in front of every protected route:
+
+```hcl title="terraform/authorizer.tf"
+resource "aws_api_gateway_authorizer" "token" {
+  name                             = "${local.prefix}-token"
+  rest_api_id                      = aws_api_gateway_rest_api.api.id
+  type                             = "TOKEN"
+  authorizer_uri                   = aws_lambda_function.authorizer.invoke_arn
+  identity_source                  = "method.request.header.Authorization"
+  identity_validation_expression   = "^Bearer [-0-9A-Za-z._~+/=]+$"
+  authorizer_result_ttl_in_seconds = var.authorizer_cache_seconds
+}
+```
+
+The validation expression lets API Gateway reject a missing or malformed header without even running the Lambda. The cache (300 seconds by default) means a busy user's token is checked once every 5 minutes, not on every click. The same file adds CORS headers to API Gateway's own error answers, so the web app can actually see a 401 and renew its session.
+
+**`auth.tf`** creates the users table, a random 48-character secret that signs tokens, the auth Lambda (with 1024 MB of memory, because password hashing is CPU-heavy and Lambda gives more CPU with more memory), and the public routes `/v1/users`, `/v1/login`, `/v1/userinfo`, `/v1/logout` and `/v1/refresh-token`.
+
+**`qr.tf`** creates the links Lambda and its routes: the owner's `.../qr` and `.../links` routes (protected) and the public `GET` and `POST /v1/d/{code}`.
+
+</Step>
+
+<Step number={7} title="Permissions and email: iam.tf and ses.tf">
+
+Every Lambda needs an IAM role: the permissions it runs with. The app's functions share one role, and each permission names exactly which resource it applies to:
+
+```hcl title="terraform/iam.tf"
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject", "s3:GetObject", "s3:DeleteObject",
+        "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts" # multipart uploads
+      ]
+      Resource = "${aws_s3_bucket.files.arn}/*"
+    },
+    ...
+    {
+      Effect   = "Allow"
+      Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+      Resource = "*"
+      Condition = {
+        "ForAllValues:StringEquals" = { "ses:FromAddress" = var.sender_email }
+      }
+    }
+```
+
+This is **least privilege**: the functions can touch this app's bucket, this app's table and its stream, and can send email only *from* your sender address. Notice there is no `dynamodb:Scan`: the file functions always look items up by key or index. A presigned URL carries the permissions of whoever signed it, so these S3 permissions are also what makes the browser's presigned uploads and downloads work.
+
+**`ses.tf`** registers `sender_email` as an SES identity. AWS then emails that address a verification link, and nothing is sent until you click it (Step 18).
+
+</Step>
+
+<Step number={8} title="Cleanup and hosting: cleanup.tf and web.tf">
+
+**`cleanup.tf`** connects the table's stream to the cleanup Lambda with an <Term t="event source mapping">A Lambda setting that reads from a stream or queue for you and calls your function with batches of records.</Term>:
+
+```hcl title="terraform/cleanup.tf"
+resource "aws_lambda_event_source_mapping" "cleanup" {
+  event_source_arn                   = aws_dynamodb_table.files.stream_arn
+  function_name                      = aws_lambda_function.fn["cleanup"].arn
+  starting_position                  = "LATEST"
+  batch_size                         = 25
+  maximum_batching_window_in_seconds = 60
+  maximum_retry_attempts             = 3
+  bisect_batch_on_function_error     = true
+
+  filter_criteria {
+    filter {
+      pattern = jsonencode({
+        eventName    = ["REMOVE"]
+        userIdentity = { type = ["Service"], principalId = ["dynamodb.amazonaws.com"] }
+        dynamodb     = { OldImage = { status = { S = ["UPLOADING"] } } }
+      })
+    }
+  }
+}
+```
+
+The filter is the clever part. The stream sees every write to the table, but the Lambda only runs for deletions made by DynamoDB itself (that is what TTL deletions look like) of records still marked `UPLOADING`. A normal delete or a finished upload never wakes it.
+
+**`web.tf`** hosts the React app. The default, `web_hosting = "amplify"`, creates an Amplify app with a `main` branch and a rewrite rule that serves `index.html` for any path without a file extension, so React Router can handle `/login` or `/admin`. The other option, `"cloudfront"`, creates a private S3 bucket behind CloudFront.
+
+<Callout type="info" title="Why Amplify is the default">
+
+Brand-new AWS accounts can't create CloudFront distributions until AWS Support has verified the account. Amplify Hosting works straight away, so it is the safe default. You can switch later and redeploy.
+
+</Callout>
+
+</Step>
+
+<Step number={9} title="Extra credit files (skim these)">
+
+These add the grown-up features. You can deploy and use DropVault without understanding them.
+
+- **`monitoring.tf`**: an SNS topic `enclave-dev-alerts` that emails `alert_email`; a CloudWatch alarm for each Lambda's errors (all but the authorizer, which "fails" on every rejected token) plus API 5xx and a 4xx spike; a log subscription that sends every `ERROR` line to a monitor Lambda; and an EventBridge schedule that runs the monitor's health check every `health_check_minutes` (5).
+- **`admin.tf`**: the admin Lambda behind `ANY /v1/admin/{proxy+}`, with its own IAM role. It is the only function allowed to scan whole tables and read CloudWatch.
+- **`kms.tf`**: the optional KMS key for `kms_mode = "shared"`, and a destroy-time script that removes per-user keys created at runtime.
+- **`domain.tf`**: an optional custom domain for the API (`api_domain_name`), with its own HTTPS certificate.
+- **`outputs.tf`**: values Terraform prints after `apply`, like `api_url` and `web_url`. `deploy.sh` reads them.
+
+</Step>
+
+## Part 3: The Lambda functions
+
+All handlers are short, because the shared layer does the repetitive work.
+
+<Step number={10} title="The shared layer: endpoints/common/python">
+
+Most file handlers are wrapped in a decorator from `api.py`. The handler just returns `(status, body)` or raises `ApiError`, and the decorator turns that into a proper API Gateway response with CORS headers. A crash becomes a logged error and a clean `500`.
+
+```python title="endpoints/common/python/api.py"
+def require_user(event):
+    '''(user_id, name, email) of the caller, whose id must match the path.'''
+    user_id, name, email = auth.resolve_event_user(event)
+    if not user_id:
+        raise ApiError(401, 'Unauthorized')
+    if auth.path_param(event, 'user_id', 3) != user_id:
+        raise ApiError(403, 'User not authorized to perform this action')
+    return user_id, name, email
+```
+
+This check matters. The authorizer proves *who you are*; `require_user` makes sure the `{user_id}` in the URL is *you*, so nobody can list someone else's files by editing the address. `owned_file` goes one step further and checks the file in the path belongs to you.
+
+Other helpers you will see everywhere:
+
+- `storage.object_key(item)` builds the S3 key `{user_id}/{file_id}/{file_name}`. Two people can upload `notes.pdf` without clashing.
+- `storage.presign_s3()` signs URLs against the regional S3 address (`s3.ap-south-1.amazonaws.com`), because the global address can answer with a redirect that breaks browser uploads.
+- `links.py` creates and checks short links, `usage.py` keeps the storage quota, `tokens.py` signs and verifies tokens.
+
+</Step>
+
+<Step number={11} title="Signing in: auth-service and authorizer">
+
+**`auth-service/src/auth_service.py`** (one Lambda, five routes, chosen by method and path):
+
+| Receives | Does | Returns |
+| --- | --- | --- |
+| `POST /v1/users` with `full_name`, `email`, `password` | checks the input, hashes the password (PBKDF2-SHA256, 200,000 rounds), saves the user only if the email is new | `201` with tokens, `user_id`, `role` (or `409` if the email exists) |
+| `POST /v1/login` with `email`, `password` | compares the hash; hashes a dummy value for unknown emails so both cases take the same time | `200` tokens, `401`, or `403` if suspended |
+| `POST /v1/refresh-token` | checks the refresh token and that the session is still valid | new tokens |
+| `POST /v1/logout` | adds 1 to the account's `token_version` | `200`, and every old token stops working |
+
+A token is two parts joined by a dot: base64 JSON claims (`sub`, `email`, `name`, `ver`, `typ`, `exp`) and an HMAC-SHA256 signature made with the secret from `auth.tf`. Anyone can read the claims, but nobody can change them without breaking the signature. Because the expiry is inside the token, the server keeps no session list. ID and access tokens last 1 hour, refresh tokens 30 days.
+
+**`authorizer/src/authorizer.py`** receives the `Authorization` header from API Gateway. It verifies the signature and expiry, then reads the account from the users table: it must still exist, not be suspended, and its `token_version` must equal the token's `ver`. If all is well it returns an "Allow" policy for the whole API plus `context: {user_id, name, email}`, which reaches every file Lambda as `requestContext.authorizer`. Otherwise it raises exactly `Exception('Unauthorized')`, which API Gateway turns into a 401.
+
+The policy covers the whole API (not just this one route) on purpose: API Gateway caches it per token and reuses it for every route that token calls.
+
+</Step>
+
+<Step number={12} title="Uploading: upload-file and complete-upload">
+
+**`upload-file/src/upload_file.py`** handles two routes.
+
+`POST /v1/users/{user_id}/files` receives `{file_name, content_type, size}`. It checks the body against `schemas/new_file.json` (a name with no slashes, up to 255 characters), refuses early with `413` if the file obviously won't fit your quota, and creates a record with `status: "UPLOADING"` and a `ttl` one day out. Then:
+
+- **Up to 100 MB:** it returns `upload_type: "single"` and one presigned PUT URL, valid for 1 hour.
+- **Over 100 MB:** it starts an S3 multipart upload and returns `upload_type: "multipart"`, a `part_size` (at least 16 MB, and big enough to stay within S3's 10,000-part limit) and a `part_count`.
+
+`POST .../{file_id}/parts` receives `{part_numbers: [1, 2, ...]}` and returns a presigned URL for each part (up to 100 at a time). With `include_uploaded: true` it also lists the parts S3 already has, which is how a paused upload resumes after a page reload. Every call pushes the record's `ttl` another day ahead, so an upload that is still moving is never cleaned up.
+
+**`complete-upload/src/complete_upload.py`** receives `POST .../{file_id}/complete` once the bytes are in S3. For a multipart upload it lists the parts and asks S3 to stitch them together (`409` with `missing_parts` if some are missing). Then it asks S3 for the real size, adds it to your usage counter, and marks the file `READY`, removing the `ttl`:
+
+```python title="endpoints/complete-upload/src/complete_upload.py"
+    try:
+        usage.add(user_id, size)
+    except usage.QuotaExceeded:
+        discard(item)
+        raise api.ApiError(413, 'Not enough storage space for this file',
+                           used_bytes=usage.used_bytes(user_id), quota_bytes=usage.quota_bytes(user_id)) from None
+```
+
+`usage.add` is one conditional DynamoDB update (`used_bytes <= :limit`), so two uploads finishing at the same moment can't both squeeze past the 10 GB limit. It uses the size S3 actually stored, not the size the browser claimed.
+
+</Step>
+
+<Step number={13} title="Listing, downloading and deleting">
+
+- **`get-user-files`**: `GET /v1/users/{user_id}/files` queries the `user-files` index (no table scan) and returns `{user_id, user_files: [...], usage: {used_bytes, quota_bytes}}`. Unfinished multipart uploads are marked `resumable`.
+- **`download-file`**: `GET .../{file_id}/download` returns `{file_id, file_name, download_url}`, a presigned GET valid for 1 hour, for your own READY file. The URL sets `Content-Disposition` so the browser saves it under the original name.
+- **`delete-user-file`**: `DELETE .../{file_id}` aborts the multipart upload if there is one, deletes the S3 object and the record, subtracts the size from your usage, and deletes the file's short links. It returns `{file_status: "DELETED"}`. Deleting with `ReturnValues='ALL_OLD'` tells it whether *this* call really removed the file, so two parallel deletes can't subtract the size twice.
+
+</Step>
+
+<Step number={14} title="Sharing: share-file and qr-link">
+
+**`share-file/src/share_file.py`** receives `{share_with: [emails], expires_in, max_downloads}` (1 to 10 unique addresses). For each recipient it creates a short link with `channel: "email"`, then sends an HTML email through SES. Everything the user typed (their name, the file name) is HTML-escaped, so nobody can inject links into mail sent from your verified address. One failed email doesn't stop the others: its link is deleted and the address is listed under `failed` with a reason. The SES sandbox case gets a friendly message suggesting Copy link instead.
+
+**`qr-link/src/qr_link.py`** has owner routes and public routes:
+
+| Route | What it does |
+| --- | --- |
+| `POST .../qr` `{expires_in, max_downloads, channel}` | creates a short link, returns `{short_url, expires_at, max_downloads}` |
+| `GET .../links` | every link for the file, with `downloads`, `last_downloaded_at` and a `status` |
+| `DELETE .../links/{code}` | turns one link off (sets `revoked_at`) |
+| `DELETE .../qr` | turns off every link made so far (stamps `links_revoked_at` on the file) |
+| `GET /v1/d/{code}` (public) | checks the link, then redirects to a fresh 5-minute download, or shows a Download button page for limited links |
+| `POST /v1/d/{code}` (public) | the Download button: counts one download, then redirects |
+
+`expires_in` must be `900`, `3600`, `21600`, `86400`, `604800` (15 minutes to 7 days) or `"never"`, and defaults to 1 hour. `max_downloads` is 1 to 1000, or `null` for unlimited.
+
+Every visit to `/v1/d/{code}` runs the same checks in order: does the file still exist and is it READY (else `404`), was the link turned off, has it expired, is the download limit used up (each `410` with a readable page). Then `record_download` counts the download with a conditional update (`downloads < :max`), so two people can never both take the last download. Finally the visitor is redirected to a presigned GET that lives 5 minutes.
+
+<Callout type="info" title="Why a button for limited links?">
+
+Email security scanners and chat apps open links on their own to build previews. If a plain GET counted as a download, a one-time link could be used up before your friend even saw it. A GET only shows the page; the Download button sends a POST, which counts.
+
+</Callout>
+
+</Step>
+
+<Step number={15} title="Cleaning up: cleanup">
+
+**`cleanup/src/cleanup.py`** receives batches of stream records (at most 25, filtered by `cleanup.tf`). For each one it checks again that it is a `REMOVE` made by `dynamodb.amazonaws.com` of an `UPLOADING` item, rebuilds the old item from DynamoDB's typed JSON (`{"S": "UPLOADING"}`) with `TypeDeserializer`, and then:
+
+```python title="endpoints/cleanup/src/cleanup.py"
+def clean(item):
+    s3 = storage.s3()
+    key = storage.object_key(item)
+    if item.get('upload_id'):
+        try:
+            s3.abort_multipart_upload(Bucket=storage.bucket(), Key=key, UploadId=item['upload_id'])
+        except ClientError as error:
+            if error.response.get('Error', {}).get('Code') != 'NoSuchUpload':
+                raise
+    s3.delete_object(Bucket=storage.bucket(), Key=key)   # no error if it isn't there
+```
+
+It returns `{"cleaned": n}`. Ignoring `NoSuchUpload` makes it safe to run twice: if the S3 lifecycle rule already aborted the upload, there is nothing to do.
+
+</Step>
+
+## Part 4: Configure and deploy
+
+<Step number={16} title="Create terraform.tfvars">
+
+Move into the `terraform` folder and copy the example settings file:
+
+<Command
+  windows={`cd terraform
+Copy-Item terraform.tfvars.example terraform.tfvars`}
+  mac={`cd terraform
+cp terraform.tfvars.example terraform.tfvars`}
+  linux={`cd terraform
+cp terraform.tfvars.example terraform.tfvars`}
+/>
+
+Open `terraform.tfvars` in your editor. The example is already close to what you need. These are the lines to check:
+
+```hcl title="terraform/terraform.tfvars"
+aws_region  = "ap-south-1"
+aws_profile = ""
+
+app_name    = "enclave"
+environment = "dev"
+
+auth_endpoint = ""
+sender_email  = "you@example.com"
+
+web_hosting     = "amplify"
+allowed_origins = ["http://localhost:3001"]
+
+user_quota_bytes = 10737418240
+admin_emails     = []
+alert_email      = ""
+kms_mode         = "s3"
+
+# Windows only: remove the # from these two lines
+# bash_bin   = "C:/Program Files/Git/bin/bash.exe"
+# python_bin = "python"
+```
+
+What each one means:
+
+| Setting | What to put | Why |
+| --- | --- | --- |
+| `aws_region` | `"ap-south-1"` (Mumbai) | The region for everything. Mumbai is the closest for India. Use the region you chose when you set up the CLI. |
+| `aws_profile` | `""` | Empty uses your default CLI credentials. Put a profile name here if you made one. |
+| `app_name`, `environment` | leave as is | Every resource name starts with `enclave-dev-`. Change `app_name` now if you want different names; changing it later replaces everything. |
+| `auth_endpoint` | `""` | Empty means "use the built-in auth service". |
+| `sender_email` | **your real email** | Share emails come from this address. You must be able to open its inbox to click the verification link. |
+| `web_hosting` | `"amplify"` | Works on new accounts (see Step 8). |
+| `allowed_origins` | leave as is | Extra addresses allowed to upload to S3, for running the web app locally. The hosted app is always allowed. |
+| `user_quota_bytes` | `10737418240` | 10 GiB per user. `0` means unlimited. |
+| `admin_emails` | optional, e.g. `["you@example.com"]` | Extra credit: these accounts get the admin panel. Lowercase only. |
+| `alert_email` | optional | Extra credit: where alert emails go. AWS sends a confirmation link first. |
+| `kms_mode` | `"s3"` | Free SSE-S3 encryption. `shared` and `per_user` use paid KMS keys. |
+| `bash_bin`, `python_bin` | Windows only | Where Git Bash and Python are, for building the layer (Step 5). |
+
+<Callout type="warning" title="Windows: two lines you must change">
+
+Remove the `#` in front of `bash_bin` and `python_bin`, and keep each line starting at the very left edge. `deploy.sh` finds settings with a simple text search for lines that *start* with the name, so an indented or commented line is ignored, and on Windows `python3` usually doesn't exist. If Git Bash is installed somewhere else, use that path, with forward slashes.
+
+</Callout>
+
+`terraform.tfvars` is listed in the repo's `.gitignore`, so your email won't be committed by accident.
+
+</Step>
+
+<Step number={17} title="Deploy with deploy.sh">
+
+On Windows, open **Git Bash** (not PowerShell) and go to the folder. In Git Bash, `C:\Users\you\dropvault` is written `/c/Users/you/dropvault`. On macOS and Linux use your normal terminal. Then run:
+
+<Command code={`cd ~/dropvault/terraform
+bash deploy.sh`} />
+
+(Change the first line if you cloned the repo somewhere other than your home folder.)
+
+Here is what the script does, so the scrolling output makes sense:
+
+1. Reads `aws_region`, `aws_profile`, `python_bin` and `display_name` from `terraform.tfvars`.
+2. Runs `terraform init` (downloads the providers) and `terraform apply -auto-approve`. Terraform builds the jsonschema layer, zips every function and creates all the resources.
+3. Reads the outputs (`api_url`, `web_url`, the Amplify app ID).
+4. Builds the web app with `npx vite build`, passing the new API address as `VITE_AUTH_URL` and `VITE_FILE_URL`. That is how the React app knows where its API is. (It runs `npm ci` first if `node_modules` is missing.)
+5. Zips the build, creates an Amplify deployment, uploads the zip with curl, starts it and checks every 5 seconds until Amplify reports `SUCCEED`.
+6. Runs the monitor's health check once and prints the result.
+7. Prints the two addresses.
+
+If anything fails, the script stops (`set -euo pipefail`) and, if you set `alert_email`, emails you that the deploy failed. Fix the problem and run it again: Terraform picks up where it left off.
+
+The first deploy takes several minutes TODO(verify).
+
+<Checkpoint output={`==> terraform apply
+...
+Apply complete! Resources: NNN added, 0 changed, 0 destroyed.
+...
+==> building web app against https://<api-id>.execute-api.ap-south-1.amazonaws.com/dev
+...
+==> publishing to Amplify app <app-id> (branch main)
+    Amplify job <job-id>: SUCCEED
+==> health check
+    ok       API: Stage “dev” is deployed and serving requests.
+    ...
+    error    Email (SES): The sender address isn’t verified, so share emails can’t be sent.
+    ...
+
+Deployed.
+  Web app : https://main.<app-id>.amplifyapp.com
+  API     : https://<api-id>.execute-api.ap-south-1.amazonaws.com/dev`}>
+
+The script ends with `Deployed.` and two addresses. Copy both somewhere. On a first deploy, `NNN` is a couple of hundred resources TODO(verify): every API route, permission and alarm counts as one. The health check complaining about the sender email is expected: that is the next step.
+
+</Checkpoint>
+
+You can print the addresses again at any time with `terraform output web_url` and `terraform output api_url`.
+
+</Step>
+
+<Step number={18} title="Verify your sender email (SES)">
+
+Open the inbox of your `sender_email`. AWS has sent an email with a verification link (the subject mentions an Email Address Verification Request TODO(verify)). Click the link.
+
+Check that it worked:
+
+<Command code={`aws ses get-identity-verification-attributes --identities you@example.com --region ap-south-1`} output={`{
+    "VerificationAttributes": {
+        "you@example.com": {
+            "VerificationStatus": "Success"
+        }
+    }
+}`} />
+
+Use your own address, of course. `Pending` means you haven't clicked the link yet.
+
+<Callout type="warning" title="The SES sandbox">
+
+New AWS accounts start in the **SES sandbox**: SES will only send *to* addresses that are verified too. To email a friend while testing, verify their address as well (they must click the link AWS sends them):
+
+```bash
+aws ses verify-email-identity --email-address friend@example.com --region ap-south-1
+```
+
+To email anyone, request production access in the SES console. Until then, Copy link and QR codes work for everyone.
+
+</Callout>
+
+<ConsoleStep path="Amazon SES > Identities">
+
+Your sender address should be listed with the status **Verified** TODO(verify). The sandbox status and the "Request production access" button are on the SES **Account dashboard** page TODO(verify).
+
+</ConsoleStep>
+
+</Step>
+
+## Part 5: Test it with the API
+
+Before opening the web app, call the API by hand. You will do exactly what the browser does, and see each piece working on its own. Run these from the `terraform` folder so `terraform output` works. On Windows, use **PowerShell** for this part (its `Invoke-RestMethod` reads JSON for you). On macOS and Linux, the commands use `curl` and `python3`.
+
+<Step number={19} title="Sign up and call a protected route">
+
+Create an account. Use a real-looking email you control; it doesn't need to be verified.
+
+<Command
+  windows={`$API = terraform output -raw api_url
+$signup = '{"full_name": "Asha Rao", "email": "asha@example.com", "password": "correct-horse-1"}'
+$me = Invoke-RestMethod -Method Post -Uri "$API/v1/users" -ContentType "application/json" -Body $signup
+$me | Select-Object user_id, email, role, expires_in`}
+  mac={`API="$(terraform output -raw api_url)"
+RESP=$(curl -s -X POST "$API/v1/users" -H "Content-Type: application/json" -d '{"full_name": "Asha Rao", "email": "asha@example.com", "password": "correct-horse-1"}')
+echo "$RESP"
+TOKEN=$(echo "$RESP" | python3 -c "import sys, json; print(json.load(sys.stdin)['id_token'])")
+USER_ID=$(echo "$RESP" | python3 -c "import sys, json; print(json.load(sys.stdin)['user_id'])")`}
+  linux={`API="$(terraform output -raw api_url)"
+RESP=$(curl -s -X POST "$API/v1/users" -H "Content-Type: application/json" -d '{"full_name": "Asha Rao", "email": "asha@example.com", "password": "correct-horse-1"}')
+echo "$RESP"
+TOKEN=$(echo "$RESP" | python3 -c "import sys, json; print(json.load(sys.stdin)['id_token'])")
+USER_ID=$(echo "$RESP" | python3 -c "import sys, json; print(json.load(sys.stdin)['user_id'])")`}
+/>
+
+<Checkpoint output={`{"id_token": "eyJzdWIiOiI2ZjFj...", "access_token": "eyJ...", "refresh_token": "eyJ...",
+ "token_type": "Bearer", "expires_in": 3600, "role": "user",
+ "user_id": "6f1c2b9e-0d4a-4b8e-9a51-2f7c3d8e1a90", "email": "asha@example.com"}`}>
+
+Three tokens, your new `user_id` and `role: "user"` (PowerShell shows the same fields as a small table). If you get `An account with this email already exists`, you ran it twice: pick another email.
+
+</Checkpoint>
+
+Now ask for your file list, first **without** a token, then with one:
+
+<Command
+  windows={`try { Invoke-RestMethod -Uri "$API/v1/users/$($me.user_id)/files" } catch { $_.Exception.Message }
+$h = @{ Authorization = "Bearer $($me.id_token)" }
+Invoke-RestMethod -Uri "$API/v1/users/$($me.user_id)/files" -Headers $h | ConvertTo-Json -Depth 5`}
+  mac={`curl -s -o /dev/null -w "%{http_code}\\n" "$API/v1/users/$USER_ID/files"
+curl -s "$API/v1/users/$USER_ID/files" -H "Authorization: Bearer $TOKEN"`}
+  linux={`curl -s -o /dev/null -w "%{http_code}\\n" "$API/v1/users/$USER_ID/files"
+curl -s "$API/v1/users/$USER_ID/files" -H "Authorization: Bearer $TOKEN"`}
+/>
+
+<Checkpoint output={`401
+{"user_id": "6f1c2b9e-...", "user_files": [], "usage": {"used_bytes": 0, "quota_bytes": 10737418240}}`}>
+
+Without a token, API Gateway itself answers **401** (PowerShell prints `The remote server returned an error: (401) Unauthorized.`): the request never reached a Lambda. With the token, the authorizer lets you through and the list Lambda answers with an empty list and your 10 GiB quota.
+
+</Checkpoint>
+
+</Step>
+
+<Step number={20} title="Upload a file the way the browser does">
+
+Uploading is three requests: ask the API for a presigned URL, PUT the bytes **straight to S3**, then tell the API you are done.
+
+<Command
+  windows={`"hello from DropVault" | Out-File -Encoding ascii hello.txt
+$size = (Get-Item hello.txt).Length
+$req = @{ file_name = "hello.txt"; content_type = "text/plain"; size = $size } | ConvertTo-Json
+$start = Invoke-RestMethod -Method Post -Uri "$API/v1/users/$($me.user_id)/files" -Headers $h -ContentType "application/json" -Body $req
+$start | Select-Object file_id, status, upload_type
+Invoke-RestMethod -Method Put -Uri $start.upload_url -InFile hello.txt -ContentType "text/plain"
+Invoke-RestMethod -Method Post -Uri "$API/v1/users/$($me.user_id)/files/$($start.file_id)/complete" -Headers $h`}
+  mac={`echo "hello from DropVault" > hello.txt
+SIZE=$(wc -c < hello.txt | tr -d ' ')
+START=$(curl -s -X POST "$API/v1/users/$USER_ID/files" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"file_name": "hello.txt", "content_type": "text/plain", "size": '"$SIZE"'}')
+echo "$START"
+FILE_ID=$(echo "$START" | python3 -c "import sys, json; print(json.load(sys.stdin)['file_id'])")
+UPLOAD_URL=$(echo "$START" | python3 -c "import sys, json; print(json.load(sys.stdin)['upload_url'])")
+curl -s -X PUT -H "Content-Type: text/plain" --data-binary @hello.txt "$UPLOAD_URL" && echo "uploaded to S3"
+curl -s -X POST "$API/v1/users/$USER_ID/files/$FILE_ID/complete" -H "Authorization: Bearer $TOKEN"`}
+  linux={`echo "hello from DropVault" > hello.txt
+SIZE=$(wc -c < hello.txt | tr -d ' ')
+START=$(curl -s -X POST "$API/v1/users/$USER_ID/files" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"file_name": "hello.txt", "content_type": "text/plain", "size": '"$SIZE"'}')
+echo "$START"
+FILE_ID=$(echo "$START" | python3 -c "import sys, json; print(json.load(sys.stdin)['file_id'])")
+UPLOAD_URL=$(echo "$START" | python3 -c "import sys, json; print(json.load(sys.stdin)['upload_url'])")
+curl -s -X PUT -H "Content-Type: text/plain" --data-binary @hello.txt "$UPLOAD_URL" && echo "uploaded to S3"
+curl -s -X POST "$API/v1/users/$USER_ID/files/$FILE_ID/complete" -H "Authorization: Bearer $TOKEN"`}
+/>
+
+<Checkpoint output={`{"file_id": "a3e9d4c0-...", "status": "UPLOADING", "upload_type": "single", "upload_headers": {},
+ "upload_url": "https://enclave-dev-files-123456789012.s3.ap-south-1.amazonaws.com/6f1c.../a3e9.../hello.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."}
+uploaded to S3
+{"file_id": "a3e9d4c0-...", "status": "READY", "size": 21}`}>
+
+Look at the `upload_url`: it points at **S3**, not at your API, and carries a signature and `X-Amz-Expires=3600`. The final answer says `READY` with the size S3 actually stored (22 bytes on Windows, because PowerShell ends the line with two characters).
+
+</Checkpoint>
+
+<Callout type="tip" title="Got 403 SignatureDoesNotMatch from S3?">
+
+The Content-Type you send on the PUT must be exactly the one you asked for (`text/plain`), because it is part of what was signed. Change one letter and S3 refuses the upload. That is the presigned URL protecting you.
+
+</Callout>
+
+</Step>
+
+<Step number={21} title="Make a one-time link and open it twice">
+
+Create a short link that lasts 15 minutes and allows one download:
+
+<Command
+  windows={`$opts = '{"expires_in": 900, "max_downloads": 1, "channel": "link"}'
+$link = Invoke-RestMethod -Method Post -Uri "$API/v1/users/$($me.user_id)/files/$($start.file_id)/qr" -Headers $h -ContentType "application/json" -Body $opts
+$link`}
+  mac={`curl -s -X POST "$API/v1/users/$USER_ID/files/$FILE_ID/qr" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"expires_in": 900, "max_downloads": 1, "channel": "link"}'`}
+  linux={`curl -s -X POST "$API/v1/users/$USER_ID/files/$FILE_ID/qr" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"expires_in": 900, "max_downloads": 1, "channel": "link"}'`}
+/>
+
+<Checkpoint output={`{"short_url": "https://<api-id>.execute-api.ap-south-1.amazonaws.com/dev/v1/d/Xk2p9vQa7LmR",
+ "expires_at": 1795257900, "max_downloads": 1}`}>
+
+A short URL ending in a 12-character code, and `expires_at` as a Unix timestamp 900 seconds from now.
+
+</Checkpoint>
+
+Now open the `short_url` in your browser (or on your phone):
+
+1. You see a small page titled `hello.txt` with a **Download (21 B)** button (22 B on Windows) and "This link can be used 1 more time." Nothing has been counted yet.
+2. Press **Download**. The file downloads straight from S3.
+3. Open the same link again. This time you get **Download limit reached**.
+
+Also try a made-up code, like `.../v1/d/notarealcode`: you get **Link not found**. Each of those pages came from the same `follow_link` function you read in Step 14.
+
+</Step>
+
+## Part 6: Open the web app
+
+<Step number={22} title="Sign in to the web app">
+
+Open the **Web app** address that `deploy.sh` printed (`https://main.<app-id>.amplifyapp.com`). Sign in with the account you just made (`asha@example.com` / `correct-horse-1`).
+
+<img src="/projects/dropvault/files-dark.png" alt="The DropVault file list in dark mode, with a file name, size and upload date on each row and action buttons on the right." />
+
+You should see `hello.txt` in the list. Now try the app properly:
+
+- **Upload** a photo or a PDF and watch the progress bar. That progress is the browser talking to S3 directly.
+- Press the **QR code** button on a file and scan it with your phone camera. The phone opens `/v1/d/{code}` and downloads the file.
+- Press the **link** button, pick a lifetime, and paste the link into another browser.
+- Open the app on your phone: the layout adapts.
+
+<Checkpoint>
+
+Your files are listed with their size and date, the storage bar shows how much of your 10 GB you use, and a scanned QR code downloads the file on your phone.
+
+</Checkpoint>
+
+If the app says the API is not configured, the build didn't receive the API address: run `bash deploy.sh` again from the `terraform` folder.
+
+**Extra credit: the admin panel.** Put your email in `admin_emails` in `terraform.tfvars` (lowercase), run `bash deploy.sh` again, and sign in with that address. **Admin** appears in the sidebar. `terraform output admin_url` prints the link.
+
+</Step>
+
+## Part 7: Try it end to end
+
+<Step number={23} title="Share with a friend and watch it work">
+
+1. Make sure your friend's email is verified in SES (Step 18), unless your account has production access.
+2. In the web app, press the **email** button on a file, enter their address, choose **1 day** and **3 downloads**, and send.
+3. Your friend gets an email from your `sender_email` with a **Download file** button. When they press it, they see the Download page, then the file.
+4. Back in the app, open the file's links. You see one link per share with its channel (`email`, `link` or `qr`), the recipient, how many downloads it has had, and its status.
+5. Turn one link off and open it again: **Link turned off**.
+
+While you click around, watch the links function's logs in a second terminal:
+
+<Command code={`aws logs tail /aws/lambda/enclave-dev-qr --follow --region ap-south-1`} />
+
+Press Ctrl+C to stop. Each request shows up within a few seconds. The other functions log to `/aws/lambda/enclave-dev-<name>`, for example `enclave-dev-share` or `enclave-dev-create-upload`.
+
+Finally, look inside the files table to see how one table holds several kinds of item:
+
+<ConsoleStep path="DynamoDB > Tables > enclave-files-dev > Explore table items">
+
+TODO(verify) the exact button label. You will see file items (a UUID as `file_id`, with `status: READY`), link items (`QR#...`, with `downloads` and `expires_at`), a `USAGE#...` counter with `used_bytes`, and a `STATS#<date>` item counting today's downloads.
+
+</ConsoleStep>
+
+<Checkpoint>
+
+A share email arrived, the download count went up in the links list, a turned-off link shows its own page, and you can match each click to a log line.
+
+</Checkpoint>
+
+</Step>
+
+## Part 8: Challenges
+
+<Step number={24} title="Make it your own">
+
+Pick one. Each is a real feature request, small enough for a weekend, and touches a different AWS idea.
+
+- **Password-protected links.** Add an optional password when creating a link, store a PBKDF2 hash on the link item (reuse `accounts.hash_password`), add a password box to the Download page, and check it in `follow_link` before `record_download`.
+- **"Your file was downloaded" emails.** In `record_download`, when `first_downloaded_at` is set for the first time, email the owner with SES. Think about where the owner's email comes from (hint: `owner_id`, and the users table is keyed by email).
+- **Custom domain for the web app.** The one unticked item on the README roadmap. Amplify Hosting supports custom domains; `domain.tf` already shows how the API gets one with its own certificate.
+- **Limit sign-in attempts.** The README says there is no rate limiting on login. Count failed attempts per email in the users table, with a TTL so the counter resets, and refuse with `429` after five.
+- **Image thumbnails.** Add an S3 event notification that runs a new Lambda when an image arrives, and save a small preview next to it.
+- **Remote Terraform state.** Move `terraform.tfstate` into an S3 bucket with a `backend "s3"` block, as the comment in `versions.tf` suggests, so a teammate can deploy too.
+- **Write a test first.** The repo has a pytest suite that runs the real handlers against a fake AWS (moto). Run `pytest`, then add a test for your new feature before you build it.
+
+Run `bash deploy.sh` after each change: Terraform updates only what changed.
+
+</Step>
+
+## Part 9: Clean up
+
+<Step number={25} title="Delete everything">
+
+When you are done, delete the whole stack. From the `terraform` folder (Git Bash, PowerShell or any terminal):
+
+<Cleanup>
+
+<Command code={`terraform destroy -var-file=terraform.tfvars`} />
+
+Terraform lists everything it will delete and asks you to type `yes`. It empties and deletes the files bucket (thanks to `force_destroy`), both tables, every function, log group, alarm, the API, the Amplify app and the SES identity. If you used `kms_mode = "per_user"`, a script also schedules the per-user keys for deletion (AWS waits at least 7 days before a key is really gone).
+
+<Checkpoint output={`Destroy complete! Resources: NNN destroyed.`}>
+
+The same number of resources that `apply` created.
+
+</Checkpoint>
+
+Then confirm nothing with the `enclave-dev` prefix is left:
+
+<Command code={`aws lambda list-functions --region ap-south-1 --query "Functions[?starts_with(FunctionName, 'enclave-dev')].FunctionName"
+aws s3api list-buckets --query "Buckets[?starts_with(Name, 'enclave-dev')].Name"
+aws dynamodb list-tables --region ap-south-1`} output={`[]
+[]
+{
+    "TableNames": []
+}`} />
+
+`list-tables` shows every table in the region, so other projects' tables may appear; just make sure `enclave-files-dev`, `enclave-users-dev` and `enclave-dev-monitor` are gone.
+
+</Cleanup>
+
+<ConsoleStep path="AWS Console > Lambda, DynamoDB, S3, Amplify, CloudWatch > Log groups">
+
+Check each service in your region (Mumbai): no `enclave-dev` functions, tables, buckets, Amplify app or log groups should remain. If a `/aws/lambda/enclave-dev-*` log group is still listed (for example because a function ran while the destroy was in progress), select it and delete it by hand.
+
+</ConsoleStep>
+
+Two things Terraform didn't create, so it doesn't delete them: any recipient addresses you verified by hand in Step 18 (free, but you can remove them with `aws ses delete-identity --identity friend@example.com --region ap-south-1`), and the local `build/` folder and `terraform.tfstate` on your computer.
+
+Keep your `terraform.tfvars`: if you want DropVault back, `bash deploy.sh` rebuilds it all in a few minutes.
+
+</Step>

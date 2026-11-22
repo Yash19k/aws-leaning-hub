@@ -19,7 +19,7 @@ const project: Project = {
     src: '/projects/dropvault/files-light.png',
     alt: 'The DropVault file list: five files, each with buttons to download, email, copy a link, show a QR code and delete.',
   },
-  liveDemoUrl: 'https://main.d1m5hv4o1y7mm2.amplifyapp.com',
+  liveDemoUrl: 'https://dropvault.d1m5hv4o1y7mm2.amplifyapp.com',
   githubUrl: 'https://github.com/Yash19k/dropvault',
   githubBranch: 'main',
   sourceFolder: 'dropvault',

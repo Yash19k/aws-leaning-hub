@@ -21,7 +21,8 @@ export type ServiceCategory =
   | 'security'
   | 'management'
   | 'integration'
-  | 'frontend';
+  | 'frontend'
+  | 'ai';
 
 /** Lucide icon names available for services and guides (see src/lib/icons.tsx). */
 export type IconName =
@@ -58,7 +59,24 @@ export type IconName =
   | 'cloud'
   | 'qr-code'
   | 'radio'
-  | 'file-code';
+  | 'file-code'
+  | 'cpu'
+  | 'container'
+  | 'package'
+  | 'hard-drive'
+  | 'folder-tree'
+  | 'snowflake'
+  | 'table'
+  | 'sparkles'
+  | 'gauge'
+  | 'waypoints'
+  | 'signpost'
+  | 'split'
+  | 'fingerprint'
+  | 'scroll'
+  | 'list'
+  | 'brain'
+  | 'bot';
 
 // ---------------------------------------------------------------- services in a project
 
@@ -246,6 +264,8 @@ export interface ServiceMeta {
   icon: IconName;
   /** Official docs home page. */
   docsUrl: string;
+  /** A core AWS service that none of the projects use yet (in the library for reference). */
+  notInProjects?: boolean;
 }
 
 export interface Service extends ServiceMeta {

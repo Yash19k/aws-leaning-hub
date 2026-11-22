@@ -1,0 +1,76 @@
+S3 Glacier is a set of [S3](/services/s3) **storage classes** for data you need to keep but almost never read: old backups, finished project files, logs you must keep for compliance. The files stay in your normal S3 bucket. You only change the **storage class** on each object, and in return it costs far less to store.
+
+The catch is getting data back. Depending on the class, a read can be instant, take minutes to hours, or take up to around half a day, and retrieval has its own charge TODO(verify).
+
+There was also an older, separate "S3 Glacier" service with **vaults** and its own API. New projects use the storage classes inside S3 instead TODO(verify).
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Backups you keep for months or years and hope never to need",
+    "Old logs or records you must keep for audits",
+    "Finished media (raw video, photo archives) that's too valuable to delete",
+    "Automatically moving old objects out of S3 Standard with a lifecycle rule",
+  ]}
+  avoid={[
+    "Anything an app or user opens regularly: retrieval fees and delays add up",
+    "Short-lived files: the colder classes have a minimum storage period you pay for even if you delete early",
+    "Files you're not sure how often you'll read: S3 Intelligent-Tiering moves them for you",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Glacier Instant Retrieval">Archive pricing, but reads come back in milliseconds like S3 Standard. Good for data read about once a quarter TODO(verify).</Concept>
+  <Concept title="Glacier Flexible Retrieval">Cheaper still. You first **restore** an object, which takes from minutes to hours depending on the speed you pay for TODO(verify).</Concept>
+  <Concept title="Glacier Deep Archive">The cheapest storage on AWS. Restores take hours, up to about 12 for the standard speed TODO(verify). Think "tape in a vault".</Concept>
+  <Concept title="Restore">For Flexible Retrieval and Deep Archive, you request a temporary copy of the object for a number of days. Once it's ready, you download it like any S3 object.</Concept>
+  <Concept title="Minimum storage duration">Each Glacier class bills a minimum number of days per object (90 or 180) even if you delete it sooner TODO(verify).</Concept>
+  <Concept title="Lifecycle rules">Bucket rules such as "move objects under `backups/` to Deep Archive after 30 days, delete after 3 years". Set once, and S3 does it automatically.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+[DropVault](/projects/dropvault)'s files are meant to be downloaded soon after they're shared, so they belong in S3 Standard; Glacier's retrieval delay would break its download links. A good Glacier use alongside either project would be keeping exported backups (for example, DynamoDB table exports) for a long time at very low cost.
+
+## Try it
+
+Upload a file straight into Deep Archive, then ask for it back. Replace the bucket name with your own:
+
+<Command code={`aws s3 cp backup.zip s3://my-bucket/archive/backup.zip --storage-class DEEP_ARCHIVE
+aws s3api restore-object --bucket my-bucket --key archive/backup.zip --restore-request Days=1`} />
+
+The restore runs in the background. This shows its progress in the `Restore` field:
+
+<Command code={`aws s3api head-object --bucket my-bucket --key archive/backup.zip`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Glacier is billed">
+
+- **Storage** per GB-month, much lower than S3 Standard, and lowest for Deep Archive TODO(verify).
+- **Retrieval** per GB and per request, higher for faster restores TODO(verify).
+- **Minimum storage duration** and a small per-object overhead, which make Glacier a bad fit for many tiny files TODO(verify).
+- Glacier classes are not part of the classic S3 free allowance TODO(verify).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="glacier-1"
+  question="You need a file from Glacier Deep Archive for a meeting in 20 minutes. What's the problem?"
+  options={["Deep Archive files can't be downloaded", "Restores from Deep Archive take hours, not minutes", "You need a different AWS account", "The file must first be moved to EBS"]}
+  answer={1}
+  explanation="Deep Archive is for data you plan for. If you need fast access sometimes, Glacier Instant Retrieval is the better class."
+/>
+
+<Quiz
+  id="glacier-2"
+  question="What's the easiest way to move every object under logs/ to a Glacier class after 90 days?"
+  options={["A Lambda function that runs daily", "An S3 lifecycle rule on the bucket", "Download and re-upload them by hand", "A CloudFront invalidation"]}
+  answer={1}
+  explanation="Lifecycle rules transition (and delete) objects automatically, with no code."
+/>

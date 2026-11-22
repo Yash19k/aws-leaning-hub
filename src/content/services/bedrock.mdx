@@ -1,0 +1,89 @@
+Bedrock gives your app **ready-made generative AI models** through one AWS API. You send a prompt, the model sends back text (or an image, or embeddings), and you pay for what you use. There are no servers or GPUs to run, and your requests stay inside AWS.
+
+Bedrock offers **foundation models** from several companies, such as Anthropic (Claude), Amazon (Nova), Meta (Llama) and Mistral, and which ones you can use depends on the region TODO(verify). Because they all sit behind the same API, switching model is often just a different model ID.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Adding a chatbot, summaries, writing help or text classification to an app",
+    "Answering questions from your own documents (RAG) with Knowledge Bases",
+    "Generating content in bulk, like quiz questions or product descriptions",
+    "Calling AI from Lambda with IAM permissions, instead of storing a third-party API key",
+  ]}
+  avoid={[
+    "Training a model from scratch on your own data: that's SageMaker",
+    "Tasks with a dedicated, cheaper AWS API: Textract for documents, Rekognition for images, Transcribe for speech",
+    "Anything where a wrong answer is dangerous and nobody checks the output",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Foundation model and model ID">A large pre-trained model. You pick one by its **model ID**. Some models are used through an **inference profile** that can route requests across regions TODO(verify).</Concept>
+  <Concept title="Model access">Your account must be allowed to use a model before calling it. Older accounts had to request access per model in the console; AWS has since made access simpler TODO(verify).</Concept>
+  <Concept title="Converse API">One request format for chat with any supported model: a list of messages (`user` and `assistant` turns) plus optional system instructions and settings. `InvokeModel` is the older, model-specific way.</Concept>
+  <Concept title="Tokens">Models read and write in **tokens**, chunks of roughly three-quarters of a word in English TODO(verify). You're billed per input token and per output token.</Concept>
+  <Concept title="Knowledge Bases">Bedrock's managed **RAG** (retrieval-augmented generation): it splits your documents from S3 into chunks, stores them as embeddings, and feeds the relevant parts to the model with each question.</Concept>
+  <Concept title="Guardrails and Agents">**Guardrails** filter harmful content and topics in both prompts and replies. **Agents** let a model call your APIs or Lambda functions to complete multi-step tasks.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project calls AI today. A natural fit would be [Quibble](/projects/quibble): an admin types a topic ("AWS networking basics"), a Lambda function asks a Bedrock model to draft ten multiple-choice questions as JSON, and the admin reviews them before they go into the questions table. Quibble's own question bank already has questions about Bedrock and Knowledge Bases.
+
+Because the Lambda function calls Bedrock with its [IAM](/services/iam) role, there's no API key to store or leak.
+
+## Try it
+
+List the text models available in your region:
+
+<Command code={`aws bedrock list-foundation-models --by-output-modality TEXT --query "modelSummaries[].[modelId,providerName]" --output table`} />
+
+Then call one from Python with the Converse API. Replace `MODEL_ID` with an ID from the list (or an inference profile ID) that your account can use:
+
+```python title="ask_bedrock.py"
+import boto3
+
+client = boto3.client("bedrock-runtime", region_name="ap-south-1")
+
+response = client.converse(
+    modelId="MODEL_ID",
+    messages=[{"role": "user", "content": [{"text": "Explain AWS Lambda in one sentence."}]}],
+    inferenceConfig={"maxTokens": 200},
+)
+
+print(response["output"]["message"]["content"][0]["text"])
+print(response["usage"])  # input and output token counts, which is what you pay for
+```
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Bedrock is billed">
+
+- **On-demand**: per 1,000 (or per million) input and output tokens, with a different price for each model TODO(verify). Output tokens usually cost more than input tokens.
+- **Batch** jobs have been offered at a discount compared with on-demand TODO(verify).
+- **Provisioned Throughput** reserves capacity by the hour and is expensive. You won't need it for learning.
+- Knowledge Bases also pay for the vector store that holds your embeddings, which may have its own running cost TODO(verify).
+- Bedrock is generally not covered by the classic Free Tier, but newer accounts' credits may apply TODO(verify). Set a [billing alarm](/setup/billing-alarm) and cap `maxTokens`.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="bedrock-1"
+  question="Your Lambda function calls Bedrock. How does it prove it's allowed to?"
+  options={["With an API key stored in the code", "With its IAM execution role, which needs permission for bedrock:InvokeModel", "Bedrock is open to everyone", "With a Cognito token"]}
+  answer={1}
+  explanation="Bedrock is an AWS API like any other, so IAM decides who may call which model. No secret key in your code."
+/>
+
+<Quiz
+  id="bedrock-2"
+  question="You want a chatbot that answers questions using your college's PDF handbook. Which Bedrock feature fits?"
+  options={["Guardrails", "Provisioned Throughput", "Knowledge Bases", "Model evaluation"]}
+  answer={2}
+  explanation="Knowledge Bases implement RAG: they find the relevant parts of your documents and give them to the model with each question."
+/>

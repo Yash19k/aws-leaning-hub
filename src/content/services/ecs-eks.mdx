@@ -1,0 +1,98 @@
+A **container** packs your app together with everything it needs (runtime, libraries, config) into one image, usually built with Docker. The same image runs the same way on your laptop and in the cloud. Running one container is easy. Running fifty of them, restarting the ones that crash, and spreading them across machines is the hard part. That job is called **orchestration**.
+
+AWS has two orchestrators:
+
+- **ECS (Elastic Container Service)** is AWS's own. Fewer concepts, tight integration with the rest of AWS, and no charge for ECS itself TODO(verify).
+- **EKS (Elastic Kubernetes Service)** runs **Kubernetes**, the open-source orchestrator used across every cloud. AWS manages the Kubernetes control plane; you get the standard `kubectl` tools and the whole Kubernetes ecosystem.
+
+Either one can run your containers on EC2 instances you manage, or on **Fargate**, where AWS runs the machines and you just say how much CPU and memory each container needs.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "An app that's already a Docker image, or a team that already works with Docker",
+    "Long-running services (web servers, APIs, workers) that you don't want tied to one server",
+    "Several small services that should be deployed and scaled independently",
+    "EKS: when your team already knows Kubernetes or needs to run the same setup on more than one cloud",
+  ]}
+  avoid={[
+    "Small event-driven functions: Lambda is simpler and costs nothing while idle",
+    "One small app you just want online: Elastic Beanstalk or a single EC2 instance is less to learn",
+    "EKS for a first project: the control plane has an hourly charge and Kubernetes has a steep learning curve",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Image and ECR">An image is the packaged app. **ECR (Elastic Container Registry)** is AWS's private place to store images, like a private Docker Hub. ECS and EKS pull images from it.</Concept>
+  <Concept title="Task definition (ECS)">A recipe for running one or more containers: which image, how much CPU and memory, which ports, which environment variables and which IAM role.</Concept>
+  <Concept title="Task and service (ECS)">A **task** is one running copy of a task definition. A **service** keeps a chosen number of tasks running, replaces failed ones, and can register them with a load balancer.</Concept>
+  <Concept title="Cluster">A group of capacity that runs your tasks or pods. With Fargate, the cluster is just a name: there are no machines for you to see.</Concept>
+  <Concept title="Pods and deployments (EKS)">Kubernetes' versions of tasks and services. A **pod** is one or more containers that run together; a **deployment** keeps a number of pods running and rolls out new versions.</Concept>
+  <Concept title="Fargate vs EC2 capacity">**Fargate**: pay per vCPU and GB of memory per second, no servers to patch. **EC2**: you run the instances, which can be cheaper at steady high load and allows GPUs and special instance types.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Both projects run on [Lambda](/services/lambda), not containers. Each Lambda function in [Quibble](/projects/quibble) wakes up for one HTTP request or one WebSocket message, then stops.
+
+If Quibble were rewritten as a single Node.js server that keeps game state in memory, ECS on Fargate would be a natural home: one service with a few tasks behind a load balancer. You'd trade "pay only when used" for "always on, but simpler to reason about".
+
+Containers and Lambda aren't enemies, either: Lambda can also run your code from a container image, up to a size limit TODO(verify).
+
+## Try it
+
+See which clusters exist in your region (both lists are probably empty):
+
+<Command code={`aws ecs list-clusters
+aws eks list-clusters`} />
+
+Create a private image repository, then delete it again:
+
+<Command code={`aws ecr create-repository --repository-name hub-test
+aws ecr delete-repository --repository-name hub-test`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How containers are billed">
+
+- **ECS** has no extra charge of its own; you pay for the Fargate time or EC2 instances that run your tasks TODO(verify).
+- **Fargate** bills per second for the vCPU and memory you ask for, from image download until the task stops TODO(verify).
+- **EKS** charges per cluster per hour for the control plane, even with nothing running on it TODO(verify). Delete practice clusters the same day.
+- **ECR** charges for image storage beyond a small free allowance TODO(verify).
+- Load balancers and NAT gateways that often come with container setups have hourly charges too TODO(verify).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="ecs-eks-1"
+  question="In ECS, what keeps three copies of your container running and replaces one that crashes?"
+  options={["A task definition", "A service", "An ECR repository", "A security group"]}
+  answer={1}
+  explanation="The task definition is the recipe; the service keeps the desired number of tasks alive."
+/>
+
+<Quiz
+  id="ecs-eks-2"
+  question="You want to run containers without managing any EC2 instances. What do you pick?"
+  options={["EKS on EC2 nodes", "Fargate", "ECR", "An Auto Scaling group"]}
+  answer={1}
+  explanation="Fargate runs each task or pod on capacity AWS manages. You set CPU and memory, not instance types."
+/>
+
+<Quiz
+  id="ecs-eks-3"
+  question="You made an EKS cluster to practise, ran nothing on it, and forgot about it for a month. What happens?"
+  options={[
+    "Nothing: an empty cluster is free",
+    "AWS deletes it after 7 days",
+    "You pay the control plane's hourly charge for the whole month",
+    "It turns into an ECS cluster",
+  ]}
+  answer={2}
+  explanation="EKS bills for the control plane per cluster per hour, whether or not anything runs on it. Clean up practice clusters."
+/>

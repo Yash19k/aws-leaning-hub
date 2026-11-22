@@ -1,0 +1,78 @@
+Cognito handles **accounts for your app's users**: sign-up, sign-in, password resets, email or phone verification, multi-factor authentication (MFA), and "Sign in with Google" style logins. After a user signs in, Cognito hands your app signed **tokens** (JWTs) that prove who they are. Your backend checks the token instead of storing and checking passwords itself.
+
+Don't confuse it with [IAM](/services/iam). IAM controls who can manage your AWS account and resources. Cognito is for the people using the app you built.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Any app that needs user accounts and you'd rather not write password storage, resets and MFA yourself",
+    "Social and enterprise logins (Google, Apple, Facebook, SAML, OIDC)",
+    "Protecting API Gateway routes with a built-in Cognito or JWT authorizer, with no Lambda code for the check",
+    "Giving signed-in users temporary AWS credentials, e.g. to upload straight to their own S3 folder",
+  ]}
+  avoid={[
+    "A learning project where building auth yourself is the point (both our projects do this on purpose)",
+    "Employees signing in to the AWS console: that's IAM Identity Center",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="User pool">A user directory with sign-up and sign-in. It stores users, enforces password and MFA rules, sends verification codes, and issues tokens.</Concept>
+  <Concept title="Tokens">An **ID token** says who the user is (email, name, groups), an **access token** says what they may call, and a **refresh token** gets new ones when they expire, so users stay signed in.</Concept>
+  <Concept title="App client and managed login">An **app client** is one app (web, mobile) that may use the pool. **Managed login** (formerly the Hosted UI) is a ready-made sign-in page on a Cognito domain, so you don't have to build forms TODO(verify).</Concept>
+  <Concept title="Identity pool">Swaps a sign-in (from a user pool or a social provider) for **temporary AWS credentials** with an IAM role, so the app can call AWS services directly.</Concept>
+  <Concept title="Lambda triggers">Hooks where your own Lambda functions run during sign-up or sign-in, e.g. to only allow your college's email domain, or to add custom claims to tokens.</Concept>
+  <Concept title="Groups">Put users into groups such as `admin`, and the group names appear in their tokens for your backend to check.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Both projects build accounts themselves, which makes them good to learn from, and Cognito is the managed alternative:
+
+- **[DropVault](/projects/dropvault)** has an `auth-service` Lambda (PBKDF2 password hashes, HMAC-signed tokens, a DynamoDB users table) and a **Lambda authorizer** that checks the token before every file route. DropVault started as a fork of an app whose auth service was built on Cognito; its sign-up was later simplified and moved to the built-in service.
+- **[Quibble](/projects/quibble)** stores bcrypt password hashes in its users table and manages its own sessions.
+
+With Cognito, the user pool would replace the auth code and users table, and API Gateway's Cognito (REST) or JWT (HTTP API) authorizer could replace the custom token check.
+
+## Try it
+
+List the user pools in your region:
+
+<Command code={`aws cognito-idp list-user-pools --max-results 10`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Cognito is billed">
+
+User pools are billed per **monthly active user** (MAU): a user who signs in, signs up or refreshes a token in that month. Since late 2024 there are feature tiers (Lite, Essentials, Plus) with different prices TODO(verify).
+
+- A free allowance of monthly active users applies to the lower tiers TODO(verify), which covers a class project many times over.
+- SMS for verification codes and MFA is billed separately, through SNS TODO(verify). Email codes or authenticator apps avoid that.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="cognito-1"
+  question="What's the difference between IAM and Cognito?"
+  options={[
+    "There is none",
+    "IAM controls access to your AWS account and resources; Cognito manages the end users of the app you built",
+    "Cognito is the paid version of IAM",
+    "IAM is for mobile apps, Cognito for web apps",
+  ]}
+  answer={1}
+  explanation="Your teammates get IAM access to deploy. Your app's users sign up in a Cognito user pool."
+/>
+
+<Quiz
+  id="cognito-2"
+  question="If DropVault used Cognito, which part of its current backend could API Gateway's built-in authorizer replace?"
+  options={["The S3 bucket", "The Lambda authorizer that checks the token on every file route", "The SES emails", "The DynamoDB files table"]}
+  answer={1}
+  explanation="API Gateway can validate Cognito tokens itself, so a custom Lambda authorizer isn't needed for that check."
+/>

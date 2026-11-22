@@ -10,6 +10,7 @@ export const CATEGORIES: Record<ServiceCategory, { label: string; color: string;
   management: { label: 'Management', color: '#D6409F', blurb: 'Watching and deploying things' },
   integration: { label: 'Messaging', color: '#0E9CC9', blurb: 'Events, emails and alerts' },
   frontend: { label: 'Web hosting', color: '#5F9E10', blurb: 'Putting your website online' },
+  ai: { label: 'AI and ML', color: '#0D9488', blurb: 'Machine learning and generative AI' },
 };
 
 export const ACTOR_COLOR = '#64748B';
@@ -23,6 +24,7 @@ export const CATEGORY_ORDER: ServiceCategory[] = [
   'integration',
   'management',
   'frontend',
+  'ai',
 ];
 
 export const DIFFICULTY: Record<Difficulty, { label: string; className: string; rank: number }> = {

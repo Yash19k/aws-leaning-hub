@@ -1,0 +1,83 @@
+Route 53 is AWS's **DNS** service. DNS (the Domain Name System) is how a name like `quiz.example.com` becomes the address of the server or service that answers it. Route 53 answers those lookups for your domains, and you can also **register** (buy) domain names through it. The name is a nod to port 53, the port DNS uses.
+
+Without a custom domain, AWS services give you long default names such as `abc123.execute-api.ap-south-1.amazonaws.com` or `main.d1abc.amplifyapp.com`. Route 53 is how you put your own name on them.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Putting a custom domain on an API, a website, CloudFront or a load balancer",
+    "Proving you own a domain so ACM can issue a free HTTPS certificate (DNS validation)",
+    "Sending traffic to the closest or healthiest region, or failing over when one is down",
+    "Buying a domain and managing its DNS in the same account as the app",
+  ]}
+  avoid={[
+    "A class demo where the default AWS URL is fine: a hosted zone has a monthly charge",
+    "A domain whose DNS already lives with another provider (like Cloudflare) that you're happy with: just add records there",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Hosted zone">The set of DNS records for one domain. A **public** zone answers the internet; a **private** zone answers only inside your VPCs. When you create a public zone, Route 53 gives you four **name servers** to set at your domain registrar.</Concept>
+  <Concept title="Record types">**A** maps a name to an IPv4 address, **AAAA** to IPv6, **CNAME** to another name, **MX** to mail servers, **TXT** to text (used for verification).</Concept>
+  <Concept title="Alias records">A Route 53 extra: an A or AAAA record that points straight at an AWS resource (API Gateway, CloudFront, a load balancer, an S3 website). Unlike a CNAME it works at the bare domain (`example.com`), and the lookups are free TODO(verify).</Concept>
+  <Concept title="TTL">How long resolvers may cache an answer. Lower it before a planned change, so the new value spreads quickly.</Concept>
+  <Concept title="Routing policies">**Simple** (one answer), **weighted** (split traffic by percentage), **latency** (nearest region), **failover** (backup when a health check fails), and **geolocation**.</Concept>
+</KeyConcepts>
+
+## How DropVault can use it
+
+[DropVault](/projects/dropvault) has an optional custom API domain. Leave `api_domain_name` empty and you get the default `execute-api` URL. Set it (for example to `files.example.com`) together with `route53_zone_id`, and `terraform/domain.tf` does three things:
+
+1. **Requests its own ACM certificate** for that name, with DNS validation.
+2. **Writes the validation records into your hosted zone**, so ACM can see you control the domain and issue the certificate.
+3. **Creates an alias A record** pointing your name at the API Gateway custom domain.
+
+It's off by default, so the architecture diagram doesn't show it. [Quibble](/projects/quibble) uses the default AWS URLs only.
+
+## Try it
+
+DNS lookups work from any terminal:
+
+<Command code={`nslookup aws.amazon.com`} />
+
+List your hosted zones (and their record counts):
+
+<Command code={`aws route53 list-hosted-zones --query "HostedZones[].[Name,Id,ResourceRecordSetCount]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Route 53 is billed">
+
+- **Hosted zones**: a monthly charge per zone, about $0.50 for the first 25 TODO(verify). Deleting a zone within 12 hours of creating it is not charged TODO(verify).
+- **Queries**: per million standard queries; alias queries to AWS resources are free TODO(verify).
+- **Domains**: a yearly price that depends on the ending (`.com`, `.in`, `.dev`...) TODO(verify).
+- **Health checks**: a monthly charge each TODO(verify).
+- Route 53 is not covered by the Free Tier TODO(verify).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="route53-1"
+  question="You want example.com (no www) to point at a CloudFront distribution. What record do you create?"
+  options={["A CNAME at the bare domain", "An alias A record pointing at the distribution", "An MX record", "A TXT record"]}
+  answer={1}
+  explanation="DNS forbids a CNAME at the zone apex. Route 53's alias records solve that for AWS resources."
+/>
+
+<Quiz
+  id="route53-2"
+  question="Why does DropVault's custom domain setup write records into your hosted zone before the API domain exists?"
+  options={[
+    "To reserve the name",
+    "So ACM can validate that you control the domain and issue the HTTPS certificate",
+    "To speed up DNS",
+    "To block other people's records",
+  ]}
+  answer={1}
+  explanation="DNS validation: ACM checks for a specific record in your zone. Once it sees it, the certificate is issued and the API domain can use it."
+/>

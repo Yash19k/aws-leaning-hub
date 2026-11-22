@@ -1,0 +1,86 @@
+A VPC is **your own private network inside AWS**. You choose its range of private IP addresses, split it into **subnets**, and decide with **route tables** and firewalls which parts can talk to the internet and which can't. Servers, databases and caches ([EC2](/services/ec2), [RDS](/services/rds), [ElastiCache](/services/elasticache)) always live inside a VPC.
+
+Every region in your account comes with a **default VPC**, already set up so that new instances get a public IP. It's handy for experiments; real projects usually build their own.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Any app with servers or databases: they always sit in a VPC",
+    "Keeping a database private, reachable only from your app and never from the internet",
+    "Letting Lambda functions reach private resources like RDS, ElastiCache or EFS",
+    "Connecting AWS to an office or another network over VPN",
+  ]}
+  avoid={[
+    "Apps built only from managed serverless services (Lambda, API Gateway, DynamoDB, S3) that need nothing private: like our projects, they can run without one",
+    "Adding a NAT gateway 'just in case': it has an hourly charge even when idle",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="CIDR block">The VPC's address range, written like `10.0.0.0/16` (about 65,000 addresses). Each subnet takes a slice, e.g. `10.0.1.0/24`.</Concept>
+  <Concept title="Public and private subnets">A subnet lives in one Availability Zone. It's **public** when its route table sends internet traffic (`0.0.0.0/0`) to an **internet gateway**. A **private** subnet has no such route, so nothing on the internet can reach it directly.</Concept>
+  <Concept title="NAT gateway">Lets resources in a private subnet make outgoing internet calls (like downloading updates) without being reachable from outside. It's billed per hour and per GB TODO(verify).</Concept>
+  <Concept title="Security groups">Firewalls on each resource (instance, database, Lambda network interface). **Stateful**: if a request is allowed in, its reply is allowed out. Allow rules only.</Concept>
+  <Concept title="Network ACLs">Optional firewalls on a whole subnet. **Stateless**: you must allow both directions. Can deny as well as allow.</Concept>
+  <Concept title="VPC endpoints">Private paths from your VPC to AWS services. **Gateway endpoints** for S3 and DynamoDB are free and work through route tables; **interface endpoints** for other services cost per hour TODO(verify).</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project creates a VPC, and neither runs its Lambda functions in one. Every service they use ([API Gateway](/services/api-gateway), [DynamoDB](/services/dynamodb), [S3](/services/s3), [SES](/services/ses), [SNS](/services/sns)) is reached over AWS's public HTTPS endpoints, protected by [IAM](/services/iam). That's simpler and avoids NAT gateway costs.
+
+A VPC would appear the moment you add something private. If [Quibble](/projects/quibble) moved to an RDS database, its Lambda functions would join private subnets with a security group that the database trusts, and DynamoDB access could go through a free gateway endpoint. Quibble's question bank covers most of this page: public subnets, NAT gateways, security groups and gateway endpoints.
+
+## Try it
+
+List your VPCs and the subnets in your region:
+
+<Command code={`aws ec2 describe-vpcs --query "Vpcs[].[VpcId,CidrBlock,IsDefault]" --output table
+aws ec2 describe-subnets --query "Subnets[].[SubnetId,VpcId,AvailabilityZone,CidrBlock,MapPublicIpOnLaunch]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How VPC is billed">
+
+VPCs, subnets, route tables, internet gateways, security groups and gateway endpoints cost nothing TODO(verify). The things to watch are:
+
+- **NAT gateways**: per hour plus per GB processed, even with no traffic TODO(verify). Delete them after practice.
+- **Interface endpoints**: per hour per Availability Zone, plus per GB TODO(verify).
+- **Public IPv4 addresses**: charged per hour TODO(verify).
+- Data sent between Availability Zones has a small per-GB charge TODO(verify).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="vpc-1"
+  question="What makes a subnet public?"
+  options={["It has a public CIDR block", "Its route table sends 0.0.0.0/0 to an internet gateway", "It's in the first Availability Zone", "It has no security groups"]}
+  answer={1}
+  explanation="Public or private is decided by routing, not by the addresses."
+/>
+
+<Quiz
+  id="vpc-2"
+  question="A security group allows inbound HTTPS. Do you need an outbound rule for the replies?"
+  options={["Yes, always", "No, security groups are stateful, so replies are allowed automatically", "Only for IPv6", "Only in private subnets"]}
+  answer={1}
+  explanation="Security groups remember connections. Network ACLs are stateless and do need rules both ways."
+/>
+
+<Quiz
+  id="vpc-3"
+  question="Why do DropVault and Quibble get away with no VPC at all?"
+  options={[
+    "VPCs aren't available to student accounts",
+    "Every service they use is a managed service reached over HTTPS with IAM, and none of it needs a private network",
+    "Lambda can't run in a VPC",
+    "They use the default VPC without knowing it",
+  ]}
+  answer={1}
+  explanation="Lambda, API Gateway, DynamoDB, S3, SES and SNS don't need a private network. A VPC becomes necessary when you add servers, RDS or ElastiCache."
+/>

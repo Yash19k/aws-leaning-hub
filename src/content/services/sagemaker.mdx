@@ -1,0 +1,71 @@
+SageMaker AI is AWS's service for **building your own machine learning models**. It covers the whole path: exploring data in notebooks, **training** a model on powerful machines (including GPUs) that run only as long as the job does, and **deploying** the trained model behind an endpoint your app can call for predictions.
+
+At the end of 2024 AWS renamed the service "Amazon SageMaker AI" and started using the plain "SageMaker" name for a wider data and AI platform (SageMaker Unified Studio) TODO(verify). Most tutorials still just say SageMaker.
+
+If you only want to **use** a ready-made generative AI model (chat, summaries, images), look at [Bedrock](/services/bedrock) first. SageMaker is for when you train, fine-tune or host the model yourself.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Training a model on your own data: predicting prices, classifying images, spotting fraud",
+    "Fine-tuning or hosting an open-source model you choose and control",
+    "Running training on GPUs without buying or managing them",
+    "Learning ML in a managed Jupyter environment",
+  ]}
+  avoid={[
+    "Adding a chatbot or text generation to an app with a ready-made model: Bedrock is simpler and bills per token",
+    "Common tasks AWS already offers as an API: Rekognition (images), Textract (documents), Comprehend (text), Transcribe (speech)",
+    "A tiny model that runs fine inside a Lambda function",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Studio and notebooks">**SageMaker Studio** is a web-based workspace with Jupyter notebooks and code editors. You pick the instance size each notebook runs on and pay while it runs.</Concept>
+  <Concept title="Training job">You point SageMaker at your training code (or a built-in algorithm), your data in [S3](/services/s3) and an instance type. It starts the machines, trains, saves the **model artifact** back to S3, and shuts the machines down.</Concept>
+  <Concept title="Endpoint (real-time inference)">A hosted model with an HTTPS endpoint your app calls for predictions. It runs on instances that bill **every hour it exists**, even with no traffic. This is the classic SageMaker surprise bill.</Concept>
+  <Concept title="Serverless and batch inference">**Serverless inference** scales to zero between requests. **Batch transform** runs predictions over a whole dataset and then stops. Both avoid paying for an idle endpoint.</Concept>
+  <Concept title="JumpStart">A catalogue of pre-trained models and solutions you can deploy or fine-tune with a few clicks TODO(verify).</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project uses machine learning. A fun SageMaker idea for [Quibble](/projects/quibble) would be a model trained on past game results that predicts how hard each question really is, so quizzes could balance easy and hard questions automatically. Quibble already saves per-player results in DynamoDB, which you could export to S3 as training data.
+
+## Try it
+
+List your endpoints. Make sure nothing is running that you forgot about:
+
+<Command code={`aws sagemaker list-endpoints --query "Endpoints[].[EndpointName,EndpointStatus,CreationTime]" --output table
+aws sagemaker list-notebook-instances --query "NotebookInstances[].[NotebookInstanceName,NotebookInstanceStatus,InstanceType]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How SageMaker AI is billed">
+
+You pay per second for the instances behind each notebook, training job and endpoint, at rates set by the instance type, plus storage TODO(verify). GPU instances cost many times more per hour than small CPU ones TODO(verify).
+
+- New SageMaker users have had a free trial with some notebook, training and inference hours for the first two months TODO(verify).
+- **Delete endpoints** and stop notebooks and Studio apps when you're done. A forgotten endpoint bills around the clock.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="sagemaker-1"
+  question="You trained a model and deployed a real-time endpoint for a demo last month. What's still costing money?"
+  options={["The training job", "The endpoint's instances, which bill every hour until you delete it", "Nothing, endpoints are free when idle", "The S3 bucket only"]}
+  answer={1}
+  explanation="Training jobs stop on their own, but real-time endpoints keep running. Delete them, or use serverless inference for occasional traffic."
+/>
+
+<Quiz
+  id="sagemaker-2"
+  question="You want your app to summarise text with an existing large language model. Where should you start?"
+  options={["Train your own model in SageMaker", "Amazon Bedrock", "An EC2 GPU instance", "Amazon Glacier"]}
+  answer={1}
+  explanation="Bedrock gives API access to ready-made foundation models. SageMaker is for building, fine-tuning or hosting your own."
+/>

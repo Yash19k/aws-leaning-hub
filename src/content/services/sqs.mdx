@@ -1,0 +1,81 @@
+SQS is a **message queue**. One part of your app (the **producer**) drops messages into a queue, and another part (the **consumer**) picks them up and processes them when it's ready. If the consumer is slow, busy or briefly broken, messages simply wait in the queue instead of being lost.
+
+That's called **decoupling**: the producer doesn't wait for the work to be done and doesn't even need to know who does it. A burst of 10,000 jobs becomes a queue that's worked through at a steady pace.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Slow work that shouldn't make a user wait: sending emails, resizing images, generating reports",
+    "Smoothing out traffic spikes so a database or API isn't overwhelmed",
+    "Retrying failed work automatically, and setting aside messages that keep failing",
+    "Fan-out with SNS: one SNS topic delivers to several queues, each with its own consumer",
+  ]}
+  avoid={[
+    "Notifying many subscribers at once (email, SMS, several systems): that's SNS",
+    "Routing events between AWS services by their content, or on a schedule: that's EventBridge",
+    "Real-time messages to connected users: use WebSockets, as Quibble does",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Standard vs FIFO queues">**Standard** queues have nearly unlimited throughput, but a message may occasionally arrive twice or out of order. **FIFO** queues (names end in `.fifo`) keep order and deliver each message exactly once, with a lower throughput limit TODO(verify).</Concept>
+  <Concept title="Receive, process, delete">A consumer **receives** a message, does the work, then **deletes** it. If it never deletes it (because it crashed), the message comes back for another try.</Concept>
+  <Concept title="Visibility timeout">While one consumer works on a message, it's hidden from others for this many seconds (30 by default TODO(verify)). Set it longer than the work takes, or the message may be processed twice.</Concept>
+  <Concept title="Dead-letter queue">After a message has been received a set number of times (`maxReceiveCount`) without being deleted, SQS moves it to a separate **dead-letter queue** so one bad message can't block everything.</Concept>
+  <Concept title="Long polling">A receive call that waits up to 20 seconds for a message to arrive, instead of returning empty straight away. Fewer empty calls means a lower bill.</Concept>
+  <Concept title="Lambda as consumer">An **event source mapping** makes Lambda poll the queue for you and call your function with batches of messages. Successfully processed messages are deleted for you.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither app uses SQS in production. Their alerts go through [SNS](/services/sns), and real-time game messages in [Quibble](/projects/quibble) go over WebSockets.
+
+SQS does show up in [DropVault](/projects/dropvault)'s tests, though. To check what alert emails the `monitor` function would send, `tests/test_monitor.py` creates a fake SNS topic and subscribes an SQS queue (`alerts-inbox`) to it, then reads the queue to see every message that was published. That's the SNS-to-SQS fan-out pattern, used as an inbox.
+
+In production, SQS would fit if DropVault's share emails were sent by a background worker: the share function would drop a message on a queue and return to the user straight away.
+
+## Try it
+
+Make a queue, send a message, receive it, and delete the queue. Copy the `QueueUrl` from the first command's output into the next three:
+
+<Command code={`aws sqs create-queue --queue-name hub-test
+aws sqs send-message --queue-url https://sqs.ap-south-1.amazonaws.com/123456789012/hub-test --message-body "resize photo 42"
+aws sqs receive-message --queue-url https://sqs.ap-south-1.amazonaws.com/123456789012/hub-test --wait-time-seconds 10
+aws sqs delete-queue --queue-url https://sqs.ap-south-1.amazonaws.com/123456789012/hub-test`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How SQS is billed">
+
+You pay per million requests (send, receive, delete and so on, each up to 64 KB counting as one request), with FIFO priced slightly higher than standard TODO(verify).
+
+- SQS has had an always-free allowance of 1 million requests a month TODO(verify).
+- Use long polling: a consumer that checks an empty queue in a tight loop makes a lot of billable requests.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="sqs-1"
+  question="A consumer receives a message, then crashes before deleting it. What happens to the message?"
+  options={["It's lost", "It becomes visible again after the visibility timeout and another consumer can retry it", "It's moved to S3", "SQS emails you"]}
+  answer={1}
+  explanation="Messages are only gone when deleted. That's what makes queues safe for retrying work."
+/>
+
+<Quiz
+  id="sqs-2"
+  question="SNS or SQS: one event must be handled by three different systems, each at its own pace. What's the classic design?"
+  options={[
+    "Three SNS topics",
+    "One SQS queue read by all three",
+    "One SNS topic with three SQS queues subscribed, one per system",
+    "One EventBridge schedule",
+  ]}
+  answer={2}
+  explanation="SNS fans the event out; each queue buffers it for its own consumer. One shared queue would give each message to only one of them."
+/>

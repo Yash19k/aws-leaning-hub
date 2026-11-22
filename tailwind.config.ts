@@ -64,6 +64,7 @@ export default {
           management: '#D6409F',
           integration: '#0E9CC9',
           frontend: '#5F9E10',
+          ai: '#0D9488',
           actor: '#64748B',
         },
       },

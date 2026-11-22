@@ -1,0 +1,69 @@
+EFS is a **shared file system**. Many [EC2](/services/ec2) instances, containers and even [Lambda](/services/lambda) functions can **mount** it at the same time and see the same folders and files, using the standard NFS protocol. It grows and shrinks on its own as you add or delete files: there's no size to choose.
+
+Where an [EBS](/services/ebs) volume is a disk plugged into one machine, EFS is the office network drive everyone shares.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Several servers or containers that must read and write the same files, e.g. a CMS's uploads folder",
+    "Lambda functions that need a large library, model or dataset that's too big for the deployment package",
+    "Home directories or shared scratch space for a team's Linux machines",
+  ]}
+  avoid={[
+    "A boot disk or a single server's database: EBS is faster and cheaper for one machine",
+    "Files that apps and browsers fetch by URL: S3 is cheaper and needs no network setup",
+    "Windows servers: EFS speaks NFS for Linux; Windows uses Amazon FSx for Windows File Server",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="File system">One EFS file system, with an ID like `fs-0abc123`. It stores data across several Availability Zones by default, so it survives a zone failure TODO(verify).</Concept>
+  <Concept title="Mount target">A network endpoint for the file system inside your [VPC](/services/vpc), one per Availability Zone. Instances in that zone connect to it on the NFS port (2049).</Concept>
+  <Concept title="Storage classes and lifecycle">**Standard** for active files, and cheaper **Infrequent Access** and **Archive** classes. A lifecycle policy moves files that haven't been opened for a while to the cheaper classes automatically TODO(verify).</Concept>
+  <Concept title="Access points">An entry point that forces a particular folder and user ID, so each app or Lambda function only sees its own part of the file system.</Concept>
+  <Concept title="Lambda and EFS">To mount EFS, a Lambda function must be attached to the VPC that holds the mount targets. That adds networking setup our projects avoid.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project uses EFS. [DropVault](/projects/dropvault) stores shared files in [S3](/services/s3) instead, which every Lambda function reaches over HTTPS without joining a VPC, and which hands files straight to the browser with presigned URLs.
+
+EFS would earn its place if a Lambda function needed a big read-only asset, for example a machine learning model of a few gigabytes, loaded from a shared folder on every invocation.
+
+## Try it
+
+List the EFS file systems in your region:
+
+<Command code={`aws efs describe-file-systems --query "FileSystems[].[FileSystemId,Name,SizeInBytes.Value,LifeCycleState]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How EFS is billed">
+
+You pay per GB-month for the data you actually store, at a different rate for each storage class, plus charges for reading data from the cheaper classes TODO(verify). Throughput above what your storage includes may cost extra depending on the throughput mode TODO(verify).
+
+- Older accounts had 5 GB of EFS Standard free for 12 months TODO(verify).
+- Per GB, EFS Standard costs much more than S3 Standard TODO(verify), so don't use it as a general file dump.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="efs-1"
+  question="Three EC2 instances behind a load balancer all need to read and write the same uploads folder. What fits best?"
+  options={["One EBS volume attached to all three", "An EFS file system mounted on all three", "Instance store disks", "A KMS key"]}
+  answer={1}
+  explanation="EFS is built for many clients at once. A regular EBS volume attaches to one instance."
+/>
+
+<Quiz
+  id="efs-2"
+  question="What does a Lambda function need before it can mount an EFS file system?"
+  options={["More memory", "To be attached to the VPC that has the mount targets", "A public IP", "A container image"]}
+  answer={1}
+  explanation="Mount targets live inside a VPC, so the function must join that VPC (with a security group that allows NFS)."
+/>

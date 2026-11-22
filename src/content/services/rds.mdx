@@ -1,0 +1,72 @@
+RDS runs a **relational (SQL) database** for you: MySQL, PostgreSQL, MariaDB, Oracle, SQL Server or Db2. You pick the engine and a size, and AWS installs it, applies patches, takes nightly backups, and can keep a standby copy ready in another data centre. You connect with the same drivers and SQL you'd use on your laptop.
+
+Relational databases store data in **tables** with fixed columns and link tables with **joins**. That's a different model from [DynamoDB](/services/dynamodb), which both our projects use, where you design around the exact questions (access patterns) your app will ask.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Data with many relationships you want to query in flexible ways: joins, reports, ad-hoc SQL",
+    "Apps built with an ORM like Prisma, Sequelize, SQLAlchemy or Django's ORM",
+    "Transactions across many rows and tables, like orders, payments and stock",
+    "Moving an existing MySQL or PostgreSQL database to the cloud",
+  ]}
+  avoid={[
+    "Simple key lookups at any scale with no server to size: DynamoDB",
+    "Bursty serverless apps with thousands of short Lambda calls: each call opening a connection can exhaust the database (RDS Proxy helps)",
+    "Caching hot data for sub-millisecond reads: ElastiCache",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="DB instance">One database server with an instance class such as `db.t4g.micro`, storage on EBS, and an endpoint like `mydb.abc123.ap-south-1.rds.amazonaws.com` you connect to.</Concept>
+  <Concept title="Multi-AZ">A standby copy in another Availability Zone, kept in sync. If the main one fails, RDS switches to the standby automatically, usually within a minute or two TODO(verify). It costs roughly double.</Concept>
+  <Concept title="Read replicas">Read-only copies that take reporting and read traffic off the main database. Writes still go to the primary.</Concept>
+  <Concept title="Backups and snapshots">Automated daily backups plus transaction logs let you restore to any second within the retention window. Manual **snapshots** are kept until you delete them.</Concept>
+  <Concept title="Networking">An RDS database lives in a [VPC](/services/vpc), protected by a security group. Best practice is a private subnet with no public access, reached only by your app.</Concept>
+  <Concept title="RDS Proxy">Sits between your app and the database and shares a pool of connections, so hundreds of Lambda functions don't each open their own.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+[Quibble](/projects/quibble) keeps everything in nine DynamoDB tables, including leaderboards that it saves pre-computed ("materialised") so reading them is a single lookup. With RDS you could instead compute a leaderboard on the fly with one SQL query (`GROUP BY` player, `ORDER BY` total score), and add new kinds of reports later without changing the tables.
+
+The price: the database runs all the time, the Lambda functions would need to join the VPC to reach it, and you'd want RDS Proxy to handle the burst of connections when a whole class answers at once. Quibble's own question bank even asks how a Lambda function reaches an RDS database in a private subnet.
+
+## Try it
+
+See which PostgreSQL versions RDS offers, and list your databases:
+
+<Command code={`aws rds describe-db-engine-versions --engine postgres --query "DBEngineVersions[-5:].EngineVersion" --output text
+aws rds describe-db-instances --query "DBInstances[].[DBInstanceIdentifier,Engine,DBInstanceClass,DBInstanceStatus]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How RDS is billed">
+
+You pay per hour for the instance (more for Multi-AZ), per GB-month of storage, for backups beyond the free amount, and for data transfer TODO(verify).
+
+- Older accounts got 750 hours a month of a small single-AZ instance and 20 GB of storage free for 12 months TODO(verify). Newer accounts get credits instead TODO(verify).
+- A **stopped** RDS instance starts itself again after 7 days TODO(verify). Delete practice databases (and their final snapshot, if you don't need it) instead.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="rds-1"
+  question="What does Multi-AZ give you?"
+  options={["Faster reads", "A standby copy in another zone that takes over automatically if the primary fails", "A cheaper bill", "A copy in another region for users abroad"]}
+  answer={1}
+  explanation="Multi-AZ is for availability. For more read capacity, add read replicas."
+/>
+
+<Quiz
+  id="rds-2"
+  question="During a class quiz, 300 Lambda functions run at once and each opens a database connection. What helps most?"
+  options={["A bigger Lambda memory size", "RDS Proxy, which pools and shares connections", "Turning off backups", "Making the database public"]}
+  answer={1}
+  explanation="Relational databases have a connection limit. RDS Proxy keeps a pool and hands connections out, which is why serverless apps often pair Lambda with DynamoDB, or RDS with a proxy."
+/>

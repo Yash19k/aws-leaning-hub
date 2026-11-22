@@ -31,7 +31,9 @@ guide slug, broken internal links, unknown MDX components, MDX syntax errors, st
 `/projects/<slug>`, `/projects/<slug>/build`, `/projects/<slug>/build#step-4`, `/setup/<slug>`,
 `/services/<slug>`, `/faq`, `/faq#<id>`, `/troubleshooting`, `/troubleshooting#<id>`.
 Project slugs: `dropvault`, `quibble`. Service slugs: see `src/content/services/services.ts`
-(`lambda s3 dynamodb api-gateway iam kms cloudwatch cloudformation sns ses eventbridge amplify cloudfront`).
+(`lambda s3 dynamodb api-gateway iam kms cloudwatch cloudformation sns ses eventbridge amplify cloudfront`,
+plus the library-only services marked `notInProjects`: `ec2 ecs-eks elastic-beanstalk ebs efs glacier rds aurora
+elasticache vpc route53 elb cognito cloudtrail sqs sagemaker bedrock`).
 Setup slugs: see `src/content/setup/guides.ts`.
 
 ## MDX components (available in every .mdx file, no imports)

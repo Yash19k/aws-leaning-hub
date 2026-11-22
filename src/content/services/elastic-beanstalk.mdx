@@ -1,0 +1,70 @@
+Elastic Beanstalk is the "just run my app" button. You upload your code as a zip (a Node.js, Python, Java, PHP, .NET, Go or Ruby app, or a Docker image) and Beanstalk creates everything around it: [EC2](/services/ec2) instances, a [load balancer](/services/elb), an Auto Scaling group, health monitoring and log collection. Deploying a new version is one command.
+
+Nothing is hidden. Beanstalk builds ordinary AWS resources in your account, using [CloudFormation](/services/cloudformation) behind the scenes, so you can open the EC2 console and see the instances it made.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "A regular web app (Express, Flask, Django, Spring) you want online quickly, without learning every service first",
+    "A hackathon or class project that needs a real server and a public URL by tonight",
+    "Seeing what a 'classic' load-balanced, auto-scaling setup looks like, then reading the resources it built",
+  ]}
+  avoid={[
+    "Event-driven or bursty apps where paying nothing while idle matters: use Lambda",
+    "Static websites with no server code: use Amplify Hosting or S3 with CloudFront",
+    "Fine control over every networking and scaling detail: build it yourself with CloudFormation, EC2 or ECS",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Application">The top-level container for your project in Beanstalk. It holds versions and environments.</Concept>
+  <Concept title="Application version">One uploaded build of your code (a zip in S3). You can roll back to an older version at any time.</Concept>
+  <Concept title="Environment">A running copy of one version, with its own URL, e.g. `my-app-prod.ap-south-1.elasticbeanstalk.com` TODO(verify). Many teams have a `staging` and a `prod` environment.</Concept>
+  <Concept title="Platform">The language runtime and OS your app runs on, such as "Node.js 22 on Amazon Linux 2023" TODO(verify). AWS updates platforms; you choose when to move.</Concept>
+  <Concept title="Single instance vs load balanced">A **single-instance** environment is one EC2 server: cheapest, good for learning. A **load-balanced** environment adds a load balancer and several instances for real traffic.</Concept>
+  <Concept title="Web server vs worker">A **web server** environment answers HTTP requests. A **worker** environment pulls jobs from an [SQS](/services/sqs) queue and processes them in the background.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project uses Beanstalk, because both are serverless: no EC2 instances at all. But Beanstalk is a useful mental comparison. [Quibble](/projects/quibble) needed a SAM template with six Lambda functions, two APIs and nine tables to go live. A traditional Express version of the same app could be zipped and deployed to Beanstalk in a few minutes, at the price of an always-on server and a separate database to set up.
+
+## Try it
+
+See which platforms Beanstalk offers in your region:
+
+<Command code={`aws elasticbeanstalk list-platform-versions --max-records 10 --query "PlatformSummaryList[].PlatformArn" --output text`} />
+
+The **EB CLI** (`pip install awsebcli`) is the friendliest way to deploy: inside your project folder, `eb init` picks the platform, `eb create` makes an environment and `eb deploy` ships a new version TODO(verify).
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Elastic Beanstalk is billed">
+
+Beanstalk itself has no extra charge. You pay for the resources it creates: EC2 instances, EBS volumes, the load balancer, and any public IPv4 addresses TODO(verify).
+
+- A **load-balanced** environment runs a load balancer around the clock, which is not free TODO(verify). Choose **single instance** while learning.
+- Run `eb terminate` (or terminate the environment in the console) when you're done, or the instances keep billing.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="beanstalk-1"
+  question="What does Elastic Beanstalk charge for on top of the resources it creates?"
+  options={["A fee per deploy", "A monthly platform fee", "Nothing: you pay only for the EC2, load balancer and other resources", "A fee per environment URL"]}
+  answer={2}
+  explanation="Beanstalk is free; the bill comes from the ordinary resources it builds for you, so cleaning up the environment matters."
+/>
+
+<Quiz
+  id="beanstalk-2"
+  question="You want background jobs (like resizing images) handled outside your web app. Which Beanstalk environment type fits?"
+  options={["A second web server environment", "A worker environment that reads from an SQS queue", "A single-instance environment", "A static site environment"]}
+  answer={1}
+  explanation="Worker environments pull messages from an SQS queue and run them, so slow jobs don't hold up web requests."
+/>

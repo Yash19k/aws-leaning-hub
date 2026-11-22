@@ -1,0 +1,75 @@
+CloudTrail records **who did what in your AWS account**. Almost every action, whether made from the console, the CLI, an SDK or another AWS service, is an API call, and CloudTrail logs each one as an **event**: who made it, from which IP address, when, what they asked for, and whether it worked.
+
+It answers questions like "who deleted that bucket?", "which access key created these EC2 instances in a region we never use?" and "what did my deploy actually change?".
+
+[CloudWatch](/services/cloudwatch) and CloudTrail are easy to mix up. CloudWatch watches how your **app** is doing (logs, metrics, alarms). CloudTrail watches what is done **to your account**.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Investigating a surprise bill or a resource nobody remembers creating",
+    "Security: spotting logins and API calls from unexpected places, or after a leaked access key",
+    "Keeping an audit history beyond the default 90 days for compliance",
+    "Alerting on risky actions, like a root account login, with EventBridge or CloudWatch",
+  ]}
+  avoid={[
+    "Debugging your own app's code: use CloudWatch Logs",
+    "Measuring performance or traffic: use CloudWatch metrics",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Event history">On by default in every account: the last 90 days of **management events**, searchable in the console, at no charge TODO(verify).</Concept>
+  <Concept title="Management vs data events">**Management events** change resources (`CreateBucket`, `RunInstances`, `CreateStack`). **Data events** are actions on the data itself (an S3 `GetObject`, a Lambda `Invoke`). Data events are not logged unless you turn them on, because there are so many of them.</Concept>
+  <Concept title="Trail">A trail copies events to an [S3](/services/s3) bucket (and optionally CloudWatch Logs) so you can keep them as long as you like. An **organization trail** covers every account in an AWS Organization.</Concept>
+  <Concept title="Event fields">Each event is JSON with `eventName`, `eventSource`, `userIdentity` (the user, role or service), `sourceIPAddress`, `requestParameters` and `errorCode` if it failed.</Concept>
+  <Concept title="CloudTrail Lake">A managed store where you query events with SQL, as an alternative to trails in S3 TODO(verify).</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project sets up CloudTrail, but it's already recording their deploys. When you run `sam deploy` for [Quibble](/projects/quibble), event history shows CloudFormation calls such as `CreateChangeSet` and `ExecuteChangeSet`, followed by the `CreateFunction`, `CreateTable` and other calls CloudFormation made for you. For [DropVault](/projects/dropvault), each `terraform apply` shows up as the individual API calls Terraform made with your credentials.
+
+Quibble's admin audit log, which it keeps in DynamoDB, is the same idea at the app level: a record of who banned which player and when.
+
+## Try it
+
+See the five most recent events in your current region:
+
+<Command code={`aws cloudtrail lookup-events --max-results 5 --query "Events[].[EventTime,EventName,Username]" --output table`} />
+
+Find who called a specific API, such as deleting an S3 bucket:
+
+<Command code={`aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=DeleteBucket --max-results 5`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How CloudTrail is billed">
+
+- **Event history** (90 days of management events) is free TODO(verify).
+- The **first trail** that delivers management events is free; extra copies of management events cost per 100,000 events TODO(verify).
+- **Data events** and **CloudTrail Lake** are charged per event or per GB TODO(verify).
+- You also pay normal S3 storage for the log files a trail writes.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="cloudtrail-1"
+  question="A teammate says, 'Someone deleted our DynamoDB table yesterday.' Where do you find out who?"
+  options={["CloudWatch metrics", "CloudTrail event history, searching for DeleteTable", "The DynamoDB console's item view", "The billing dashboard"]}
+  answer={1}
+  explanation="CloudTrail logs the DeleteTable call with the identity that made it, its IP address and the time."
+/>
+
+<Quiz
+  id="cloudtrail-2"
+  question="Are S3 object downloads (GetObject) in CloudTrail's default event history?"
+  options={["Yes, every download is logged by default", "No, those are data events, which you must turn on in a trail", "Only for public buckets", "Only in us-east-1"]}
+  answer={1}
+  explanation="Event history covers management events. Data events like GetObject need a trail with data events turned on, and they're charged."
+/>

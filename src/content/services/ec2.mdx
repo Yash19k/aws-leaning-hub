@@ -1,0 +1,100 @@
+EC2 gives you a **virtual server**, called an **instance**, running in an AWS data centre. You choose how much CPU and memory it has, which operating system it boots (Linux or Windows), and what software runs on it. Then you connect to it over SSH or a browser session and use it like any computer.
+
+It is the oldest and most flexible way to run code on AWS. The flip side: the server is yours to look after. You install updates, restart crashed processes, and decide when to add more servers. Lambda, which both our projects use, hides all of that.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "A long-running program: a game server, a Discord bot, a self-hosted app that must stay up all day",
+    "Software that needs full control of the machine: custom OS packages, GPUs, special drivers",
+    "Moving an existing app from your own server to the cloud without rewriting it",
+    "Learning Linux and server administration hands-on",
+  ]}
+  avoid={[
+    "Short bits of code that run when a request or event arrives: use AWS Lambda",
+    "Containers you'd rather not manage servers for: use ECS on Fargate",
+    "Just putting a web app online with as little setup as possible: try Elastic Beanstalk or Amplify Hosting",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Instance type">The size of the server, written like `t3.micro` or `m7g.large`. The letter is the family (t = burstable, general purpose; c = compute heavy; r = memory heavy; g in the name = Graviton ARM chips), the number is the generation, and the last word is the size.</Concept>
+  <Concept title="AMI">An **Amazon Machine Image** is the starting disk for your instance: the operating system plus any software baked in. Amazon Linux and Ubuntu are common choices.</Concept>
+  <Concept title="Key pair and Session Manager">A **key pair** lets you log in over SSH: AWS keeps the public key, you keep the private `.pem` file. **Session Manager** (part of AWS Systems Manager) opens a shell from the browser with no SSH port open at all.</Concept>
+  <Concept title="Security group">A firewall around the instance. It lists which ports are open to whom, e.g. port 22 only from your IP and port 443 from anywhere. Everything else is blocked.</Concept>
+  <Concept title="Storage">The instance's disk is usually an [EBS](/services/ebs) volume, which survives a stop and start. Stopping an instance stops the compute bill, but you still pay for its EBS volumes.</Concept>
+  <Concept title="Pricing models">**On-Demand** is pay per second with no commitment. **Savings Plans** and **Reserved Instances** are cheaper in exchange for a one- or three-year commitment. **Spot** uses spare capacity at a big discount, but AWS can take the instance back with a two-minute warning TODO(verify).</Concept>
+  <Concept title="Auto Scaling group">Keeps a set number of instances running, replaces unhealthy ones, and can add or remove instances as load changes. Usually paired with a [load balancer](/services/elb).</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project uses EC2, and that is a deliberate choice. [DropVault](/projects/dropvault) and [Quibble](/projects/quibble) do work in short bursts (an upload, a quiz answer), so [Lambda](/services/lambda) is a better fit: nothing runs, and nothing is billed, between requests.
+
+Think about EC2 when you'd have to keep a process alive between requests. Quibble's live games, for example, use API Gateway's WebSocket API so that no server has to hold the connections open. A classic alternative would be a Node.js WebSocket server on an EC2 instance, which you'd then have to keep running, patch and scale yourself.
+
+## Try it
+
+List a few instance types and their sizes, without creating anything:
+
+<Command code={`aws ec2 describe-instance-types --instance-types t3.micro t3.small t4g.micro --query "InstanceTypes[].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB]" --output table`} />
+
+See what's running in your current region (an empty list is good news for your bill):
+
+<Command code={`aws ec2 describe-instances --query "Reservations[].Instances[].[InstanceId,InstanceType,State.Name]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How EC2 is billed">
+
+You pay for each second an instance is **running** (with a one-minute minimum on Linux TODO(verify)), at a rate set by the instance type and region. On top of that come its EBS volumes, data transfer out to the internet, and each public IPv4 address, which AWS has charged for by the hour since 2024 TODO(verify).
+
+- Older accounts got 750 hours a month of a small instance (such as `t2.micro` or `t3.micro`) free for 12 months TODO(verify).
+- Accounts created after the 2025 Free Tier change get credits to spend instead TODO(verify). See [Create your AWS account](/setup/create-aws-account).
+- The classic surprise bill is an instance someone forgot to **terminate**. Stopping it is not enough if it has large volumes or an Elastic IP.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="ec2-1"
+  question="You stop an EC2 instance overnight. What do you still pay for?"
+  options={[
+    "Nothing: a stopped instance is free",
+    "The instance's compute hours, at a lower rate",
+    "Its EBS volumes (and any Elastic IP), but not compute time",
+    "Only the data it sent while it was running",
+  ]}
+  answer={2}
+  explanation="Stopping ends the compute charge, but the disks still exist and keep billing. Terminate the instance (and check its volumes) when you are really done."
+/>
+
+<Quiz
+  id="ec2-2"
+  question="Your web server instance can't be reached on port 443, but SSH works. Where do you look first?"
+  options={[
+    "The AMI",
+    "The instance's security group rules",
+    "The key pair",
+    "The instance type",
+  ]}
+  answer={1}
+  explanation="A security group blocks every port you haven't opened. Add an inbound rule for HTTPS (443)."
+/>
+
+<Quiz
+  id="ec2-3"
+  question="Why do DropVault and Quibble use Lambda instead of EC2?"
+  options={[
+    "EC2 can't run Python or Node.js",
+    "Their work comes in short bursts, so paying only per request and having no servers to patch is a better fit",
+    "EC2 is not available in ap-south-1",
+    "Lambda is always faster than EC2",
+  ]}
+  answer={1}
+  explanation="EC2 can run anything, but it bills while idle and needs looking after. Request-driven apps like these fit Lambda's model."
+/>

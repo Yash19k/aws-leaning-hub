@@ -1,0 +1,69 @@
+Aurora is a relational database that AWS rebuilt for the cloud. Your app sees **MySQL** or **PostgreSQL**: same drivers, same SQL, same tools. Underneath, the storage layer is AWS's own design. It keeps six copies of your data across three Availability Zones and grows automatically as you add data TODO(verify).
+
+Aurora is part of [RDS](/services/rds), so you create it from the same console, but it behaves a bit differently: instead of one instance with its own disk, you get a **cluster** of instances that share one storage volume.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "A production MySQL or PostgreSQL app that needs high availability and fast failover",
+    "Read-heavy apps that need many read replicas sharing the same data",
+    "Workloads that swing between quiet and busy, using Aurora Serverless v2 to scale capacity up and down",
+    "Apps with users on several continents, using Aurora Global Database",
+  ]}
+  avoid={[
+    "A small learning project: a single small RDS instance is usually cheaper",
+    "Engines other than MySQL and PostgreSQL: use RDS",
+    "Simple key-value lookups in a serverless app: DynamoDB needs no capacity planning",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Cluster and cluster volume">A cluster has one **writer** instance and up to 15 **reader** instances TODO(verify), all reading the same shared storage, so replicas don't each need a copy of the data.</Concept>
+  <Concept title="Endpoints">Aurora gives you a **writer endpoint** that always points at the current writer, and a **reader endpoint** that spreads connections across the readers. Your app doesn't need to know which instance is which.</Concept>
+  <Concept title="Fast failover">If the writer fails, a reader is promoted, typically in well under a minute TODO(verify). The writer endpoint follows it automatically.</Concept>
+  <Concept title="Aurora Serverless v2">Capacity is measured in **ACUs** (Aurora Capacity Units) and scales in small steps as load changes, between a minimum and maximum you set TODO(verify).</Concept>
+  <Concept title="Global Database">Copies a cluster to other regions with typically about a second of lag, for local reads and disaster recovery TODO(verify).</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+The same story as [RDS](/services/rds): our projects chose [DynamoDB](/services/dynamodb), which needs no VPC and bills per request. If [Quibble](/projects/quibble) moved to SQL, Aurora Serverless v2 would be the closest match to its current style, because capacity follows the load. You'd still need the VPC setup and connection pooling that RDS needs.
+
+## Try it
+
+List Aurora clusters and see which Aurora PostgreSQL versions exist:
+
+<Command code={`aws rds describe-db-clusters --query "DBClusters[].[DBClusterIdentifier,Engine,Status]" --output table
+aws rds describe-db-engine-versions --engine aurora-postgresql --query "DBEngineVersions[-3:].EngineVersion" --output text`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How Aurora is billed">
+
+You pay per instance-hour (or per ACU-hour on Serverless v2), per GB-month of storage, and, on the **Standard** configuration, per million I/O requests. **I/O-Optimized** charges more for instances and storage but nothing per I/O TODO(verify).
+
+- Aurora was not part of the classic 12-month RDS free offer TODO(verify).
+- Aurora Serverless v2 has a minimum capacity. Whether it can scale all the way to zero when idle depends on the engine version TODO(verify).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="aurora-1"
+  question="Your app uses PostgreSQL. Can it move to Aurora without changing its SQL?"
+  options={["No, Aurora has its own query language", "Yes, Aurora PostgreSQL is compatible with PostgreSQL drivers and SQL", "Only if you rewrite it for DynamoDB", "Only for read queries"]}
+  answer={1}
+  explanation="Compatibility is the point: the storage engine is different, the interface is PostgreSQL (or MySQL)."
+/>
+
+<Quiz
+  id="aurora-2"
+  question="Why can an Aurora reader replica be added quickly even for a huge database?"
+  options={["It only copies the last day of data", "All instances share the same cluster storage volume, so nothing needs copying", "Replicas don't hold data", "AWS pre-builds replicas in advance"]}
+  answer={1}
+  explanation="Readers attach to the shared cluster volume rather than copying it, which is one of Aurora's big differences from RDS."
+/>

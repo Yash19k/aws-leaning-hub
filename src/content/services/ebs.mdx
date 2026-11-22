@@ -1,0 +1,76 @@
+EBS gives an [EC2](/services/ec2) instance its hard drive. Each **volume** is a network-attached disk that you attach to one instance; the instance sees it as an ordinary drive (`/dev/xvda` on Linux, `C:` on Windows). Because it lives separately from the instance, the data survives a stop and start, and you can detach the volume and attach it to a different instance.
+
+EBS is **block storage**: the operating system formats it with a file system and reads and writes small blocks, which is fast enough for databases and boot disks. Compare that with [S3](/services/s3), which stores whole files (objects) over HTTPS.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "The boot disk of every EC2 instance",
+    "A database you run yourself on EC2 (PostgreSQL, MongoDB) that needs fast, low-latency disk",
+    "Extra space for an app's files on a single server",
+    "Point-in-time backups of a server's disk, using snapshots",
+  ]}
+  avoid={[
+    "Files that many servers must read and write at once: use EFS",
+    "User uploads, images and backups that apps fetch by URL: use S3, as DropVault does",
+    "Anything in a Lambda-only app: Lambda functions don't attach EBS volumes",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Volume">One virtual disk with a size in GiB and a type. It lives in one **Availability Zone** and can only attach to instances in that same zone.</Concept>
+  <Concept title="Volume types">**gp3** is the general-purpose SSD default. **io2** is for databases that need guaranteed high IOPS. **st1** and **sc1** are cheaper hard-disk types for large sequential data TODO(verify).</Concept>
+  <Concept title="IOPS and throughput">**IOPS** is how many reads or writes per second the disk handles; **throughput** is how many MB per second. With gp3 you can raise both separately from size TODO(verify).</Concept>
+  <Concept title="Snapshot">A backup of a volume, stored in S3 by AWS. Snapshots are **incremental**: after the first, each one only stores blocks that changed. You can create a new volume from a snapshot, even in another zone.</Concept>
+  <Concept title="Delete on termination">A setting on each attached volume. Boot volumes usually have it on; extra volumes often don't, so they keep existing (and billing) after the instance is gone.</Concept>
+  <Concept title="Encryption">Volumes can be encrypted with a [KMS](/services/kms) key, with no change to your app. You can turn on encryption by default for new volumes in a region.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Neither project has a server, so neither has an EBS volume. DropVault stores files in [S3](/services/s3) and data in [DynamoDB](/services/dynamodb), both of which scale without any disk to size.
+
+Fun fact: an EBS question is in [Quibble](/projects/quibble)'s own AWS question bank. The answer is that a volume can only attach to instances in the same Availability Zone.
+
+## Try it
+
+List your volumes. A volume whose state is `available` isn't attached to anything, but you still pay for it:
+
+<Command code={`aws ec2 describe-volumes --query "Volumes[].[VolumeId,Size,VolumeType,State]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How EBS is billed">
+
+You pay per GB-month of **provisioned** size, whether or not the disk is full, plus extra IOPS or throughput above the gp3 baseline TODO(verify). Snapshots are billed per GB-month of data stored TODO(verify).
+
+- Older accounts had 30 GB of EBS free for 12 months TODO(verify). Newer accounts get credits instead TODO(verify).
+- Look for unattached (`available`) volumes and old snapshots: they are the most common forgotten cost after an instance is terminated.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="ebs-1"
+  question="Your instance is in ap-south-1a. You try to attach a volume from ap-south-1b. What happens?"
+  options={["It works but is slower", "It fails: a volume attaches only to instances in its own Availability Zone", "AWS copies it automatically", "It works if the volume is encrypted"]}
+  answer={1}
+  explanation="Make a snapshot, then create a new volume from it in ap-south-1a."
+/>
+
+<Quiz
+  id="ebs-2"
+  question="You terminated an instance last week, but your bill still shows EBS charges. Why?"
+  options={[
+    "AWS bills a week late for EBS",
+    "An extra volume had delete on termination switched off, so it still exists",
+    "Terminated instances keep their compute charge for 7 days",
+    "Snapshots are created automatically on termination",
+  ]}
+  answer={1}
+  explanation="Check `describe-volumes` for volumes in the `available` state and delete the ones you don't need."
+/>

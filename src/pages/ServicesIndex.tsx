@@ -13,7 +13,7 @@ import { usePageMeta } from '@/lib/meta';
 import type { ServiceCategory } from '@/lib/types';
 
 export default function ServicesIndex() {
-  usePageMeta('Service library', 'Every AWS service used in the projects, explained with an analogy, key ideas, Free Tier notes and a quiz.');
+  usePageMeta('Service library', 'The AWS services the projects use, plus the core services most people know, each explained with an analogy, key ideas, Free Tier notes and a quiz.');
   const [cat, setCat] = useState<ServiceCategory | 'all'>('all');
   const [q, setQ] = useState('');
   const reduced = useReducedMotion();
@@ -35,9 +35,9 @@ export default function ServicesIndex() {
       <Breadcrumbs items={[{ label: 'Services' }]} />
       <header className="mb-8">
         <p className="eyebrow mb-2">Service library</p>
-        <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">The AWS services in these projects</h1>
+        <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">The AWS services worth knowing</h1>
         <p className="mt-4 max-w-2xl text-lg leading-relaxed text-muted">
-          Each card is one service: what it is in one line, a real-life analogy, and the projects that use it.
+          Each card is one service: what it is in one line, a real-life analogy, and the projects that use it. The ones marked "Beyond the projects" are core services most AWS builders meet sooner or later.
         </p>
       </header>
 
@@ -108,7 +108,9 @@ export default function ServicesIndex() {
                         <span className="text-xs font-bold text-muted">
                           {s.usedInProjects.length
                             ? `Used in ${s.usedInProjects.map((p) => getProject(p)?.title.split(':')[0]).join(', ')}`
-                            : 'Used by this site'}
+                            : s.notInProjects
+                              ? 'Beyond the projects'
+                              : 'Used by this site'}
                         </span>
                         <ArrowRight className="h-4 w-4 text-muted transition-transform group-hover:translate-x-1" style={{ color }} aria-hidden="true" />
                       </div>

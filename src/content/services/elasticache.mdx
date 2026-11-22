@@ -1,0 +1,70 @@
+ElastiCache runs an **in-memory data store** for you: **Valkey** or **Redis OSS** (feature-rich, with lists, sorted sets and more) or **Memcached** (a simple key-value cache). Because everything sits in RAM, reads and writes take well under a millisecond.
+
+The classic use is a **cache**: before asking the slow database, ask the cache. If the answer is there (a **hit**), you skip the database. If not (a **miss**), read the database and store the answer in the cache with an expiry time (**TTL**) for next time.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Taking repeated read load off a database, such as a popular product page",
+    "Live leaderboards and rankings, with Redis or Valkey sorted sets",
+    "Login sessions and rate limits that many servers must share",
+    "Short-lived data that must be shared quickly between servers, like a pub/sub chat",
+  ]}
+  avoid={[
+    "Your only copy of important data: it's memory first, so plan for losing it",
+    "Data that's rarely read twice: a cache only helps when the same answer is reused",
+    "A small serverless app where DynamoDB alone is fast enough: ElastiCache adds a VPC and a fixed cost",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Cache-aside">The most common pattern: the app checks the cache, falls back to the database on a miss, then writes the result into the cache. The app is in charge, so the cache can be emptied safely at any time.</Concept>
+  <Concept title="TTL">How many seconds a cached item lives before it expires. Short TTLs mean fresher data; long TTLs mean fewer database reads.</Concept>
+  <Concept title="Sorted sets">A Redis and Valkey type that keeps members ordered by a score. Adding a score and reading the top 10 are both single, fast commands, which is why leaderboards love it.</Concept>
+  <Concept title="Serverless or node-based">**ElastiCache Serverless** scales automatically and bills by data stored and work done. The node-based option has you choose node sizes and counts TODO(verify).</Concept>
+  <Concept title="Inside your VPC">An ElastiCache cache has no public address. Your app, including any Lambda function, must be inside the same [VPC](/services/vpc) to reach it.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+[Quibble](/projects/quibble) does several things a cache usually does, but in DynamoDB: it saves leaderboards pre-computed in its results table, and keeps rate limits in a table of their own (`RateLimitsTable` in its template). That keeps the whole app VPC-free and pay-per-request.
+
+At a much bigger scale, a Valkey or Redis sorted set could hold a live leaderboard (`ZINCRBY` to add points, `ZREVRANGE` for the top 10). The trade-off is a fixed monthly cost, a VPC for the Lambda functions, and one more system to keep in sync.
+
+## Try it
+
+List your caches of both kinds:
+
+<Command code={`aws elasticache describe-serverless-caches --query "ServerlessCaches[].[ServerlessCacheName,Engine,Status]" --output table
+aws elasticache describe-cache-clusters --query "CacheClusters[].[CacheClusterId,Engine,CacheNodeType,CacheClusterStatus]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How ElastiCache is billed">
+
+- **Node-based**: per node per hour, set by the node type TODO(verify). Older accounts had 750 hours a month of a small node free for 12 months TODO(verify).
+- **Serverless**: per GB-hour of data stored plus per unit of work (ElastiCache Processing Units), with a minimum stored amount billed TODO(verify).
+- Valkey has been priced lower than Redis OSS on ElastiCache TODO(verify).
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="elasticache-1"
+  question="In the cache-aside pattern, what happens on a cache miss?"
+  options={["The request fails", "The app reads the database, then stores the result in the cache", "The cache reads the database by itself", "The cache restarts"]}
+  answer={1}
+  explanation="The app owns the logic: read from the source of truth, then fill the cache for next time."
+/>
+
+<Quiz
+  id="elasticache-2"
+  question="Which Redis or Valkey data type fits a live top-10 leaderboard best?"
+  options={["A plain string", "A sorted set", "A list", "A Bloom filter"]}
+  answer={1}
+  explanation="Sorted sets keep members ordered by score, so updating a score and reading the top N are both quick, single commands."
+/>

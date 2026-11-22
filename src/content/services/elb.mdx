@@ -1,0 +1,72 @@
+A **load balancer** is a single entry point that spreads incoming requests across several servers, containers or functions. It keeps checking each one's health and stops sending traffic to any that fail. Users always see one address; behind it you can add, remove or replace servers without anyone noticing.
+
+Elastic Load Balancing (ELB) is the family of AWS load balancers. It's managed: AWS keeps it running and scales it to your traffic.
+
+## When to use it
+
+<WhenToUse
+  use={[
+    "Two or more EC2 instances or containers serving the same app",
+    "Zero-downtime deploys: shift traffic to new servers, then remove the old ones",
+    "Routing by path or host name to different services, like /api to one and /admin to another",
+    "Ending HTTPS in one place with a free ACM certificate",
+  ]}
+  avoid={[
+    "Lambda-only APIs: API Gateway adds auth, throttling and WebSockets and needs no always-on resource",
+    "A single small server for a demo: the load balancer has an hourly charge",
+    "Serving static files: use CloudFront with S3 or Amplify Hosting",
+  ]}
+/>
+
+## Key ideas
+
+<KeyConcepts>
+  <Concept title="Application Load Balancer (ALB)">Works at the HTTP level (layer 7). It can route on path, host name, headers and query strings, and send traffic to EC2, containers, IP addresses or Lambda functions.</Concept>
+  <Concept title="Network Load Balancer (NLB)">Works at the TCP and UDP level (layer 4). Built for very high throughput and low latency, with a fixed IP address per Availability Zone. Good for games and non-HTTP protocols.</Concept>
+  <Concept title="Gateway Load Balancer">For putting third-party network appliances, like firewalls, in the path of traffic. Rarely needed in student projects.</Concept>
+  <Concept title="Listener">A port and protocol the load balancer listens on (e.g. HTTPS on 443) and the rules for what to do with each request.</Concept>
+  <Concept title="Target group and health checks">A target group is a set of servers (targets) that share a health check, e.g. "GET /health must return 200". Unhealthy targets get no traffic until they pass again.</Concept>
+  <Concept title="With Auto Scaling">An Auto Scaling group registers new instances into the target group automatically, so the load balancer always knows the current fleet.</Concept>
+</KeyConcepts>
+
+## Where it would fit in our projects
+
+Both projects use [API Gateway](/services/api-gateway) as their front door instead. For Lambda backends it does more out of the box: request validation, authorizers (DropVault's token check), throttling, and in [Quibble](/projects/quibble)'s case a WebSocket API. It also costs nothing when no one is using it, while a load balancer bills every hour.
+
+A load balancer would appear if either app moved to [EC2](/services/ec2) or [ECS](/services/ecs-eks): an ALB in front of a few servers, with a health check on each.
+
+## Try it
+
+List your load balancers and target groups:
+
+<Command code={`aws elbv2 describe-load-balancers --query "LoadBalancers[].[LoadBalancerName,Type,Scheme,State.Code]" --output table
+aws elbv2 describe-target-groups --query "TargetGroups[].[TargetGroupName,Protocol,Port,HealthCheckPath]" --output table`} />
+
+## Free Tier and cost
+
+<Callout type="cost" title="How load balancers are billed">
+
+You pay per hour that the load balancer exists, plus usage measured in **LCUs** (load balancer capacity units for ALB, NLCUs for NLB), which combine new connections, active connections, data processed and rule evaluations TODO(verify).
+
+- Older accounts got 750 hours a month of a Classic or Application Load Balancer free for 12 months TODO(verify). Newer accounts get credits instead TODO(verify).
+- A load balancer bills even with no traffic and no targets, so delete practice ones.
+
+</Callout>
+
+## Quick quiz
+
+<Quiz
+  id="elb-1"
+  question="You want /api requests to go to one group of servers and everything else to another. Which load balancer?"
+  options={["Network Load Balancer", "Application Load Balancer", "Gateway Load Balancer", "Any of them"]}
+  answer={1}
+  explanation="Path-based routing is an HTTP (layer 7) feature, which is what the ALB does."
+/>
+
+<Quiz
+  id="elb-2"
+  question="One of three servers crashes. What does the load balancer do?"
+  options={["Keeps sending a third of the traffic to it", "Notices it failing health checks and sends traffic only to the healthy two", "Restarts the server", "Stops all traffic"]}
+  answer={1}
+  explanation="Health checks take failed targets out of rotation. Replacing the server is the Auto Scaling group's job."
+/>

@@ -71,7 +71,7 @@ export default function ServicePage() {
         </div>
       </header>
 
-      <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="mt-10 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
         <article className="prose-hub max-w-none">
           {Body ? (
             <Suspense fallback={<PageLoader />}>
@@ -107,6 +107,11 @@ export default function ServicePage() {
                   </li>
                 ))}
               </ul>
+            ) : service.notInProjects ? (
+              <p className="mt-2 text-sm text-muted">
+                {service.shortName} isn't on the <Link to="/projects" className="text-link">project diagrams</Link>. The page below shows
+                where it would fit.
+              </p>
             ) : (
               <p className="mt-2 text-sm text-muted">
                 Used by <Link to="/how-this-site-works" className="text-link">this very site</Link>.

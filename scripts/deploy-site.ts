@@ -37,14 +37,53 @@ const outputs: Record<string, string> = Object.fromEntries(
   (stack.Stacks[0].Outputs as { OutputKey: string; OutputValue: string }[]).map((o) => [o.OutputKey, o.OutputValue]),
 );
 if (outputs.AmplifyAppId) {
-  await deployToAmplify(outputs.AmplifyAppId);
+  const appId = outputs.AmplifyAppId;
+  // Stacks created before the site branch existed only have "main".
+  const siteBranch = outputs.AmplifySiteBranch ?? 'main';
+  console.log(`Deploying dist/ to Amplify app ${appId}, branch ${siteBranch} (stack ${STACK}, ${REGION})\n`);
+  await deployToAmplify(appId, siteBranch, zipDir(DIST));
+  const redirectBranch = outputs.AmplifyRedirectBranch;
+  if (redirectBranch && redirectBranch !== siteBranch) {
+    console.log(`\nPublishing the redirect page to branch ${redirectBranch}\n`);
+    await deployToAmplify(appId, redirectBranch, zipFiles([{ name: 'index.html', data: Buffer.from(redirectPage(outputs.SiteUrl)) }]));
+  }
   console.log(`Done. Site: ${outputs.SiteUrl}`);
   process.exit(0);
 }
 
 // ---------------------------------------------------------------- Amplify Hosting (manual deployment)
 
-/** Minimal zip writer (deflate), so the script needs no extra tools on any OS. */
+/**
+ * The page served on the old address. The app's SPA rule serves it for every path, and it forwards
+ * to the same path, query and #hash on the site (a plain link if JavaScript is off).
+ */
+function redirectPage(siteUrl: string): string {
+  const url = siteUrl.replace(/\/+$/, '');
+  const host = new URL(url).host;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>AWS Learning Hub has moved</title>
+<link rel="canonical" href="${url}/">
+<script>location.replace(${JSON.stringify(url)} + location.pathname + location.search + location.hash);</script>
+<noscript><meta http-equiv="refresh" content="0; url=${url}/"></noscript>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px/1.5 system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+  a { color: #0d9488; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { body { background: #0b1220; color: #e2e8f0; } a { color: #2dd4bf; } }
+</style>
+</head>
+<body>
+<p>AWS Learning Hub has moved to <a href="${url}/">${host}</a>.</p>
+</body>
+</html>
+`;
+}
+
 function zipDir(dir: string): Buffer {
   const files: string[] = [];
   const walk = (d: string) => {
@@ -55,12 +94,17 @@ function zipDir(dir: string): Buffer {
     }
   };
   walk(dir);
+  return zipFiles(files.map((file) => ({ name: path.relative(dir, file).split(path.sep).join('/'), data: readFileSync(file) })));
+}
+
+/** Minimal zip writer (deflate), so the script needs no extra tools on any OS. */
+function zipFiles(files: { name: string; data: Buffer }[]): Buffer {
   const local: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
   for (const file of files) {
-    const name = Buffer.from(path.relative(dir, file).split(path.sep).join('/'));
-    const data = readFileSync(file);
+    const name = Buffer.from(file.name);
+    const data = file.data;
     const packed = deflateRawSync(data);
     const crc = crc32(data);
     const header = Buffer.alloc(30);
@@ -97,18 +141,16 @@ function zipDir(dir: string): Buffer {
   return Buffer.concat([...local, cd, end]);
 }
 
-async function deployToAmplify(appId: string) {
-  console.log(`Deploying dist/ to Amplify app ${appId} (stack ${STACK}, ${REGION})\n`);
-  const zip = zipDir(DIST);
-  const job = JSON.parse(aws(['amplify', 'create-deployment', '--app-id', appId, '--branch-name', 'main', '--output', 'json']));
+async function deployToAmplify(appId: string, branch: string, zip: Buffer) {
+  const job = JSON.parse(aws(['amplify', 'create-deployment', '--app-id', appId, '--branch-name', branch, '--output', 'json']));
   const res = await fetch(job.zipUploadUrl, { method: 'PUT', body: new Uint8Array(zip), headers: { 'Content-Type': 'application/zip' } });
   if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
   console.log(`Uploaded ${(zip.length / 1024 / 1024).toFixed(1)} MB`);
-  aws(['amplify', 'start-deployment', '--app-id', appId, '--branch-name', 'main', '--job-id', job.jobId, '--output', 'json']);
+  aws(['amplify', 'start-deployment', '--app-id', appId, '--branch-name', branch, '--job-id', job.jobId, '--output', 'json']);
   for (let i = 0; i < 90; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const status = JSON.parse(
-      aws(['amplify', 'get-job', '--app-id', appId, '--branch-name', 'main', '--job-id', job.jobId, '--output', 'json'], true),
+      aws(['amplify', 'get-job', '--app-id', appId, '--branch-name', branch, '--job-id', job.jobId, '--output', 'json'], true),
     ).job.summary.status as string;
     process.stdout.write(`  ${status}\n`);
     if (status === 'SUCCEED') return;

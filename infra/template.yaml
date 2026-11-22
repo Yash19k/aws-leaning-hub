@@ -27,6 +27,13 @@ Parameters:
     Type: String
     Default: main
     Description: Only workflows running on this branch can assume the deploy role
+  SiteBranchName:
+    Type: String
+    Default: aws-learning-hub
+    AllowedPattern: '[a-z0-9][a-z0-9-]*'
+    Description: >
+      amplify mode: the Amplify branch that serves the site. Its name is the first part of the
+      address: https://<SiteBranchName>.<app-id>.amplifyapp.com
   CreateGitHubOidcProvider:
     Type: String
     AllowedValues: ['true', 'false']
@@ -59,6 +66,18 @@ Resources:
           Target: /index.html
           Status: '200'
 
+  # The site: https://<SiteBranchName>.<app-id>.amplifyapp.com
+  AmplifySiteBranch:
+    Type: AWS::Amplify::Branch
+    Condition: UseAmplify
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref SiteBranchName
+      Stage: PRODUCTION
+
+  # The site's first address, https://main.<app-id>.amplifyapp.com. Kept so old links keep working:
+  # deploy-site publishes a one-file page here that forwards to the same path on the site branch.
+  # (Amplify redirect rules are per app, not per branch, so a 301 rule would loop on the site branch.)
   AmplifyBranch:
     Type: AWS::Amplify::Branch
     Condition: UseAmplify
@@ -239,7 +258,11 @@ Resources:
                 - Sid: AmplifyManualDeploy
                   Effect: Allow
                   Action: [amplify:CreateDeployment, amplify:StartDeployment, amplify:GetJob]
-                  Resource: !Sub '${AmplifyApp.Arn}/branches/main*'
+                  Resource:
+                    - !Sub '${AmplifyApp.Arn}/branches/${SiteBranchName}'
+                    - !Sub '${AmplifyApp.Arn}/branches/${SiteBranchName}/*'
+                    - !Sub '${AmplifyApp.Arn}/branches/main'
+                    - !Sub '${AmplifyApp.Arn}/branches/main/*'
                 - !Ref AWS::NoValue
               - !If
                 - UseCloudFront
@@ -271,10 +294,18 @@ Outputs:
     Value: !If
       - UseCloudFront
       - !Sub 'https://${Distribution.DomainName}'
-      - !Sub 'https://main.${AmplifyApp.DefaultDomain}'
+      - !Sub 'https://${SiteBranchName}.${AmplifyApp.DefaultDomain}'
   AmplifyAppId:
     Condition: UseAmplify
     Value: !GetAtt AmplifyApp.AppId
+  AmplifySiteBranch:
+    Description: deploy-site publishes dist/ to this Amplify branch
+    Condition: UseAmplify
+    Value: !GetAtt AmplifySiteBranch.BranchName
+  AmplifyRedirectBranch:
+    Description: deploy-site publishes a page here that forwards old links to SiteUrl
+    Condition: UseAmplify
+    Value: !GetAtt AmplifyBranch.BranchName
   BucketName:
     Condition: UseCloudFront
     Value: !Ref SiteBucket

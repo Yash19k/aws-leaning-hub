@@ -18,8 +18,13 @@ GitHub Actions ──OIDC──► IAM deploy role ──► s3 sync + cloudfron
 
 | Mode | What it creates | When |
 | --- | --- | --- |
-| `amplify` (default) | An AWS Amplify Hosting app; `deploy:site` uploads `dist/` as a zip (manual deployment) | Works on any account. **The live site uses this** (`https://main.d1mth3xfrof3ju.amplifyapp.com`) |
+| `amplify` (default) | An AWS Amplify Hosting app; `deploy:site` uploads `dist/` as a zip (manual deployment) | Works on any account. **The live site uses this** (`https://aws-learning-hub.d1mth3xfrof3ju.amplifyapp.com`) |
 | `cloudfront` | Private S3 bucket + CloudFront + OAC + CloudFront Function (described below) | Once AWS Support has enabled CloudFront on the account |
+
+In `amplify` mode the address is `https://<SiteBranchName>.<app-id>.amplifyapp.com`. Amplify picks the
+app ID; the `SiteBranchName` parameter (default `aws-learning-hub`) sets the first part. The site's first
+address, `https://main.<app-id>.amplifyapp.com`, is kept: `deploy:site` publishes a one-file page to the
+`main` branch that forwards every path to the same path on the site branch.
 
 Switch with `cd infra && sam deploy --parameter-overrides HostingMode=cloudfront`, then `npm run deploy:site`
 (the script reads the stack outputs and picks the right upload path). The site URL changes, so update any shared links.
